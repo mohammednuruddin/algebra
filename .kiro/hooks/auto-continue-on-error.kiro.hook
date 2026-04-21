@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "name": "Auto Continue on Error",
+  "description": "Automatically prompts the agent to continue and resolve issues when execution stops, ensuring tasks are completed even after encountering errors",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Continue"
+  },
+  "workspaceFolderName": "Algebra",
+  "shortName": "auto-continue-on-error"
+}
