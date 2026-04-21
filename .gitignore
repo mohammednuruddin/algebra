@@ -27,6 +27,7 @@
 .playwright-cli/
 .playwright-mcp/
 zo/
+supabase/.temp/
 
 # debug
 npm-debug.log*
