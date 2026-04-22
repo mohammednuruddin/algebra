@@ -37,6 +37,13 @@ Two transient paths had no bounded retry behavior:
 - bounded retries: max 3 attempts
 - same root operation retried; no broad fallback path added
 - final error still surfaces if all 3 attempts fail
+- in non-production, failed article responses now include `debug.attempts` with:
+  - prompt messages
+  - upstream status
+  - raw response text
+  - extracted model content
+  - parsed response
+  - per-attempt error reason
 
 ## Regression Tests
 - [app/api/tutor/article/route.test.ts](/Users/nuru/sanchrobytes/algebra/app/api/tutor/article/route.test.ts:1)

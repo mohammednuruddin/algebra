@@ -244,11 +244,25 @@ describe('POST /api/tutor/article', () => {
     });
 
     const response = await POST(request);
-    const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json()) as {
+      error?: string;
+      debug?: {
+        attempts?: Array<{
+          attempt: number;
+          rawModelContent: string | null;
+          parsedResponse: unknown;
+          error: string | null;
+        }>;
+      };
+    };
 
     expect(response.status).toBe(500);
     expect(payload.error).toMatch(/invalid format/i);
     expect(payload.error).toMatch(/3 attempts/i);
+    expect(payload.debug?.attempts).toHaveLength(3);
+    expect(payload.debug?.attempts?.[0]?.attempt).toBe(1);
+    expect(payload.debug?.attempts?.[0]?.rawModelContent).toContain('"title":"Pollination"');
+    expect(payload.debug?.attempts?.[0]?.error).toMatch(/invalid format/i);
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 });

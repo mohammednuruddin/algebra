@@ -1,11 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildOpenRouterRequest } from '@/lib/ai/openrouter';
+import { formatTutorDebugMessages, formatTutorDebugValue } from '@/lib/tutor/debug-log';
 import type { TutorRuntimeSnapshot } from '@/lib/types/tutor';
 import { retryAsync } from '@/lib/utils/retry';
 
 interface ArticleGenerationRequest {
   snapshot: TutorRuntimeSnapshot;
 }
+
+type ArticleGenerationDebugAttempt = {
+  attempt: number;
+  messages: Array<{
+    role: 'system' | 'user';
+    content: string;
+  }>;
+  responseStatus: number | null;
+  rawResponseText: string | null;
+  rawModelContent: string | null;
+  parsedResponse: unknown;
+  error: string | null;
+};
 
 function parseJson(text: string): unknown {
   try {
@@ -15,20 +29,89 @@ function parseJson(text: string): unknown {
   }
 }
 
-class RetryableArticleGenerationError extends Error {
-  constructor(message: string) {
+class ArticleGenerationAttemptError extends Error {
+  constructor(
+    message: string,
+    readonly debugAttempt: ArticleGenerationDebugAttempt,
+    readonly retryable: boolean
+  ) {
     super(message);
-    this.name = 'RetryableArticleGenerationError';
+    this.name = 'ArticleGenerationAttemptError';
   }
 }
 
-function isRetryableArticleGenerationError(
+function isArticleGenerationAttemptError(
   error: unknown
-): error is RetryableArticleGenerationError {
-  return error instanceof RetryableArticleGenerationError;
+): error is ArticleGenerationAttemptError {
+  return error instanceof ArticleGenerationAttemptError;
 }
 
-async function generateArticleContent(snapshot: TutorRuntimeSnapshot) {
+function logArticleAttemptDebug(debug: ArticleGenerationDebugAttempt) {
+  if (process.env.NODE_ENV === 'production') {
+    return;
+  }
+
+  console.log(
+    `[tutor:article] attempt ${debug.attempt} prompt\n${JSON.stringify(
+      formatTutorDebugMessages(debug.messages),
+      null,
+      2
+    )}`
+  );
+  console.log(
+    `[tutor:article] attempt ${debug.attempt} response status`,
+    debug.responseStatus
+  );
+  console.log(
+    `[tutor:article] attempt ${debug.attempt} raw response text`,
+    formatTutorDebugValue(debug.rawResponseText)
+  );
+  console.log(
+    `[tutor:article] attempt ${debug.attempt} raw model content`,
+    formatTutorDebugValue(debug.rawModelContent)
+  );
+  console.log(
+    `[tutor:article] attempt ${debug.attempt} parsed response`,
+    formatTutorDebugValue(debug.parsedResponse)
+  );
+  console.log(`[tutor:article] attempt ${debug.attempt} error`, debug.error);
+}
+
+function buildArticleAttemptDebug(
+  attempt: number,
+  messages: ArticleGenerationDebugAttempt['messages'],
+  overrides: Partial<Omit<ArticleGenerationDebugAttempt, 'attempt' | 'messages'>>
+): ArticleGenerationDebugAttempt {
+  return {
+    attempt,
+    messages,
+    responseStatus: null,
+    rawResponseText: null,
+    rawModelContent: null,
+    parsedResponse: null,
+    error: null,
+    ...overrides,
+  };
+}
+
+function buildArticleAttemptError(
+  message: string,
+  debugAttempt: ArticleGenerationDebugAttempt,
+  retryable: boolean
+) {
+  const debug = {
+    ...debugAttempt,
+    error: message,
+  };
+
+  logArticleAttemptDebug(debug);
+  return new ArticleGenerationAttemptError(message, debug, retryable);
+}
+
+async function generateArticleContent(
+  snapshot: TutorRuntimeSnapshot,
+  attempt: number
+) {
   const turnsSummary = snapshot.turns
     .map((turn) => `${turn.actor}: ${turn.text}`)
     .join('\n');
@@ -64,15 +147,20 @@ async function generateArticleContent(snapshot: TutorRuntimeSnapshot) {
   });
 
   const text = await response.text();
+  const responseStatus = response.status;
 
   if (!response.ok) {
     const message = `Article generation failed (${response.status}): ${text.slice(0, 200)}`;
+    const debugAttempt = buildArticleAttemptDebug(attempt, messages, {
+      responseStatus,
+      rawResponseText: text,
+    });
 
     if (response.status === 429 || response.status >= 500) {
-      throw new RetryableArticleGenerationError(message);
+      throw buildArticleAttemptError(message, debugAttempt, true);
     }
 
-    throw new Error(message);
+    throw buildArticleAttemptError(message, debugAttempt, false);
   }
 
   const payload = parseJson(text) as {
@@ -80,7 +168,15 @@ async function generateArticleContent(snapshot: TutorRuntimeSnapshot) {
   };
   const content = payload?.choices?.[0]?.message?.content;
   if (!content) {
-    throw new RetryableArticleGenerationError('Article generation returned no content');
+    throw buildArticleAttemptError(
+      'Article generation returned no content',
+      buildArticleAttemptDebug(attempt, messages, {
+        responseStatus,
+        rawResponseText: text,
+        parsedResponse: payload,
+      }),
+      true
+    );
   }
 
   const parsed = parseJson(content) as {
@@ -89,13 +185,23 @@ async function generateArticleContent(snapshot: TutorRuntimeSnapshot) {
   };
 
   if (!parsed || !parsed.article_markdown) {
-    throw new RetryableArticleGenerationError('Article generation returned invalid format');
+    throw buildArticleAttemptError(
+      'Article generation returned invalid format',
+      buildArticleAttemptDebug(attempt, messages, {
+        responseStatus,
+        rawResponseText: text,
+        rawModelContent: content,
+        parsedResponse: parsed,
+      }),
+      true
+    );
   }
 
   return parsed;
 }
 
 export async function POST(request: NextRequest) {
+  const debugAttempts: ArticleGenerationDebugAttempt[] = [];
   try {
     const body = (await request.json()) as ArticleGenerationRequest;
     const { snapshot } = body;
@@ -107,14 +213,23 @@ export async function POST(request: NextRequest) {
     const parsed = await retryAsync(
       async (attempt) => {
         attemptsUsed = attempt;
-        return generateArticleContent(snapshot);
+        try {
+          return await generateArticleContent(snapshot, attempt);
+        } catch (error) {
+          if (isArticleGenerationAttemptError(error)) {
+            debugAttempts.push(error.debugAttempt);
+          }
+
+          throw error;
+        }
       },
       {
         attempts: 3,
-        shouldRetry: isRetryableArticleGenerationError,
+        shouldRetry: (error) =>
+          isArticleGenerationAttemptError(error) ? error.retryable : false,
       }
     ).catch((error) => {
-      if (isRetryableArticleGenerationError(error)) {
+      if (isArticleGenerationAttemptError(error)) {
         throw new Error(`${error.message} after ${attemptsUsed} attempts`);
       }
 
@@ -145,7 +260,16 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error generating article:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to generate article' },
+      {
+        error: error instanceof Error ? error.message : 'Failed to generate article',
+        ...(process.env.NODE_ENV === 'production'
+          ? {}
+          : {
+              debug: {
+                attempts: debugAttempts,
+              },
+            }),
+      },
       { status: 500 }
     );
   }
