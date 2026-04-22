@@ -2,6 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Mic, MicOff, Square } from 'lucide-react';
+import {
+  ASSEMBLY_STREAM_SAMPLE_RATE,
+  buildAssemblyAiStreamingQuery,
+  resolveAssemblyAiCompletedTranscript,
+  type AssemblyAiTurnMessage,
+} from '@/lib/stt/assemblyai-streaming';
+import { appendPcmChunks } from '@/lib/stt/pcm-chunker';
+import {
+  isMeaningfulTutorTranscript,
+  shouldTriggerTutorBargeIn,
+} from '@/lib/tutor/intake-heuristics';
 
 interface TutorVoiceDockProps {
   disabled?: boolean;
@@ -9,26 +20,10 @@ interface TutorVoiceDockProps {
   runtimeStatus?: 'loading' | 'ready' | 'error';
   teacherSpeaking?: boolean;
   onTranscript: (text: string) => Promise<void> | void;
+  onSpeechStart?: () => void;
 }
 
-type TurnMessage = {
-  type?: string;
-  transcript?: string;
-  turn_is_formatted?: boolean;
-};
-
-const STREAM_SAMPLE_RATE = 16000;
-const STREAM_QUERY = new URLSearchParams({
-  sample_rate: String(STREAM_SAMPLE_RATE),
-  speech_model: 'u3-rt-pro',
-  format_turns: 'true',
-  end_of_turn_confidence_threshold: '0.4',
-  min_end_of_turn_silence_when_confident: '120',
-  max_turn_silence: '1000',
-  vad_threshold: '0.4',
-  speaker_labels: 'false',
-  language_detection: 'false',
-});
+const STREAM_QUERY = buildAssemblyAiStreamingQuery();
 
 const AUDIO_WORKLET_NAME = 'pcm-capture-processor';
 const AUDIO_WORKLET_SOURCE = `
@@ -58,7 +53,7 @@ function getAudioWorkletModuleUrl() {
 }
 
 function downsampleToInt16(samples: Float32Array, inputSampleRate: number) {
-  if (inputSampleRate === STREAM_SAMPLE_RATE) {
+  if (inputSampleRate === ASSEMBLY_STREAM_SAMPLE_RATE) {
     const pcm = new Int16Array(samples.length);
     for (let index = 0; index < samples.length; index += 1) {
       const sample = Math.max(-1, Math.min(1, samples[index] ?? 0));
@@ -67,7 +62,7 @@ function downsampleToInt16(samples: Float32Array, inputSampleRate: number) {
     return pcm;
   }
 
-  const ratio = inputSampleRate / STREAM_SAMPLE_RATE;
+  const ratio = inputSampleRate / ASSEMBLY_STREAM_SAMPLE_RATE;
   const outputLength = Math.round(samples.length / ratio);
   const pcm = new Int16Array(outputLength);
   let sourceIndex = 0;
@@ -105,9 +100,10 @@ export function TutorVoiceDock({
   runtimeStatus = 'loading',
   teacherSpeaking = false,
   onTranscript,
+  onSpeechStart,
 }: TutorVoiceDockProps) {
   const [micEnabled, setMicEnabled] = useState(true);
-  const [streamingState, setStreamingState] = useState<'idle' | 'connecting' | 'listening' | 'thinking'>('idle');
+  const [streamingState, setStreamingState] = useState<'idle' | 'connecting' | 'listening' | 'processing'>('idle');
   const [voiceLevel, setVoiceLevel] = useState(0);
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -125,8 +121,10 @@ export function TutorVoiceDock({
   const canAutoListenRef = useRef(false);
   const onTranscriptRef = useRef(onTranscript);
   const streamStartIdRef = useRef(0);
+  const pendingPcmSamplesRef = useRef<number[]>([]);
+  const bargeInTriggeredRef = useRef(false);
 
-  const canAutoListen = micEnabled && !disabled && runtimeStatus === 'ready' && speechToTextEnabled && !teacherSpeaking;
+  const canAutoListen = micEnabled && !disabled && runtimeStatus === 'ready' && speechToTextEnabled;
 
   useEffect(() => {
     canAutoListenRef.current = canAutoListen;
@@ -144,7 +142,7 @@ export function TutorVoiceDock({
     }
   }, []);
 
-  const stopStreaming = useCallback(async (nextState: 'idle' | 'thinking' = 'idle') => {
+  const stopStreaming = useCallback(async (nextState: 'idle' | 'processing' = 'idle') => {
     stoppingRef.current = true;
     streamStartIdRef.current += 1;
     clearConnectionTimeout();
@@ -185,6 +183,8 @@ export function TutorVoiceDock({
       mediaStream.getTracks().forEach((track) => track.stop());
     }
     mediaStreamRef.current = null;
+    pendingPcmSamplesRef.current = [];
+    bargeInTriggeredRef.current = false;
 
     const audioContext = audioContextRef.current;
     audioContextRef.current = null;
@@ -225,6 +225,7 @@ export function TutorVoiceDock({
     if (mountedRef.current) {
       setStreamingState(nextState);
       setVoiceLevel(0);
+      setTranscript('');
     }
   }, [clearConnectionTimeout]);
 
@@ -270,7 +271,7 @@ export function TutorVoiceDock({
         throw new Error('AudioContext is not available in this browser');
       }
 
-      const audioContext = new AudioContextCtor({ sampleRate: STREAM_SAMPLE_RATE });
+      const audioContext = new AudioContextCtor({ sampleRate: ASSEMBLY_STREAM_SAMPLE_RATE });
 
       if (!mountedRef.current || !canAutoListenRef.current || startId !== streamStartIdRef.current) {
         mediaStream.getTracks().forEach((track) => track.stop());
@@ -324,12 +325,26 @@ export function TutorVoiceDock({
           setVoiceLevel(level);
         }
 
+        if (
+          !bargeInTriggeredRef.current &&
+          shouldTriggerTutorBargeIn({
+            teacherSpeaking,
+            voiceLevel: level,
+          })
+        ) {
+          bargeInTriggeredRef.current = true;
+          onSpeechStart?.();
+        }
+
         if (websocket.readyState !== WebSocket.OPEN) {
           return;
         }
 
         const pcm = downsampleToInt16(floatSamples, audioContext.sampleRate);
-        websocket.send(pcm.buffer);
+        const chunks = appendPcmChunks(pendingPcmSamplesRef.current, pcm);
+        for (const chunk of chunks) {
+          websocket.send(chunk.buffer);
+        }
       };
 
       websocket.onopen = () => {
@@ -350,7 +365,7 @@ export function TutorVoiceDock({
           return;
         }
 
-        const payload = JSON.parse(String(event.data)) as TurnMessage;
+        const payload = JSON.parse(String(event.data)) as AssemblyAiTurnMessage;
         if (payload.type !== 'Turn') {
           return;
         }
@@ -360,10 +375,19 @@ export function TutorVoiceDock({
           setTranscript(nextTranscript);
         }
 
-        if (payload.turn_is_formatted && nextTranscript) {
-          setStreamingState('thinking');
-          await stopStreaming('thinking');
-          await onTranscriptRef.current(nextTranscript);
+        const completedTranscript = resolveAssemblyAiCompletedTranscript(payload);
+        if (completedTranscript) {
+          if (!isMeaningfulTutorTranscript(completedTranscript)) {
+            setTranscript('');
+            setStreamingState('listening');
+            return;
+          }
+          setStreamingState('processing');
+          setTranscript('');
+          await onTranscriptRef.current(completedTranscript);
+          if (mountedRef.current && canAutoListenRef.current && !stoppingRef.current) {
+            setStreamingState('listening');
+          }
         }
       };
 
@@ -398,7 +422,7 @@ export function TutorVoiceDock({
     } finally {
       restartingRef.current = false;
     }
-  }, [canAutoListen, clearConnectionTimeout, stopStreaming, streamingState]);
+  }, [canAutoListen, clearConnectionTimeout, onSpeechStart, stopStreaming, streamingState, teacherSpeaking]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -439,7 +463,7 @@ export function TutorVoiceDock({
     if (streamingState === 'connecting') {
       return 'Connecting live transcript...';
     }
-    if (streamingState === 'thinking') {
+    if (streamingState === 'processing') {
       return transcript || 'Sending your turn...';
     }
     if (transcript.trim()) {
@@ -476,7 +500,7 @@ export function TutorVoiceDock({
             }`}
             aria-label={micEnabled ? 'Pause microphone' : 'Resume microphone'}
           >
-            {streamingState === 'connecting' || streamingState === 'thinking' ? (
+            {streamingState === 'connecting' || streamingState === 'processing' ? (
               <Loader2 className="h-5 w-5 animate-spin" />
             ) : !micEnabled ? (
               <MicOff className="h-5 w-5" />
@@ -492,7 +516,7 @@ export function TutorVoiceDock({
               {statusText}
             </p>
             <span className="text-[10px] font-semibold tracking-widest uppercase text-zinc-400">
-              {listening ? 'Live' : teacherSpeaking ? 'Tutor' : streamingState === 'thinking' ? 'Send' : 'Ready'}
+              {listening ? 'Live' : teacherSpeaking ? 'Tutor' : streamingState === 'processing' ? 'Send' : 'Ready'}
             </span>
           </div>
           <div className="mt-2 flex items-end gap-[3px] h-[30px]">

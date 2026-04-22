@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AudioWaveform, Loader2, Mic, Square } from 'lucide-react';
+import {
+  ASSEMBLY_STREAM_SAMPLE_RATE,
+  buildAssemblyAiStreamingQuery,
+  resolveAssemblyAiCompletedTranscript,
+  type AssemblyAiTurnMessage,
+} from '@/lib/stt/assemblyai-streaming';
 
 interface VoiceDockProps {
   disabled?: boolean;
@@ -14,29 +20,12 @@ interface VoiceDockProps {
   onSpeechStart?: () => void;
 }
 
-type TurnMessage = {
-  type?: string;
-  transcript?: string;
-  turn_is_formatted?: boolean;
-};
-
-const STREAM_SAMPLE_RATE = 16000;
-const STREAM_QUERY = new URLSearchParams({
-  sample_rate: String(STREAM_SAMPLE_RATE),
-  speech_model: 'u3-rt-pro',
-  format_turns: 'true',
-  end_of_turn_confidence_threshold: '0.4',
-  min_end_of_turn_silence_when_confident: '100',
-  max_turn_silence: '1000',
-  vad_threshold: '0.4',
-  speaker_labels: 'false',
-  language_detection: 'false',
-});
+const STREAM_QUERY = buildAssemblyAiStreamingQuery();
 
 function downsampleToInt16(
   samples: Float32Array,
   inputSampleRate: number,
-  outputSampleRate = STREAM_SAMPLE_RATE
+  outputSampleRate = ASSEMBLY_STREAM_SAMPLE_RATE
 ) {
   if (inputSampleRate === outputSampleRate) {
     const pcm = new Int16Array(samples.length);
@@ -253,7 +242,7 @@ export function VoiceDock({
           return;
         }
 
-        const payload = JSON.parse(String(event.data)) as TurnMessage;
+        const payload = JSON.parse(String(event.data)) as AssemblyAiTurnMessage;
 
         if (payload.type === 'Turn') {
           const nextTranscript = payload.transcript?.trim() || '';
@@ -261,10 +250,11 @@ export function VoiceDock({
             setTranscript(nextTranscript);
           }
 
-          if (payload.turn_is_formatted && nextTranscript) {
+          const completedTranscript = resolveAssemblyAiCompletedTranscript(payload);
+          if (completedTranscript) {
             setStreamingState('transcribing');
             await stopStreaming('idle');
-            onTranscript(nextTranscript);
+            onTranscript(completedTranscript);
           }
         }
       };

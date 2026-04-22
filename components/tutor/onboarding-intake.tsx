@@ -142,7 +142,7 @@ export function OnboardingIntake({
           
           <div className="border-l-2 border-zinc-200 pl-6 py-2">
              <p className="text-[10px] tracking-[0.2em] uppercase text-zinc-400 mb-6 font-semibold">Tutor Audio</p>
-             <TutorSpeech speech={isPreparing ? 'Preparing your focused lesson…' : promptText} helperText={null} thinking={false} />
+             <TutorSpeech speech={isPreparing ? 'Preparing your focused lesson…' : promptText} thinking={false} />
           </div>
 
           <div className="min-h-[16rem]">

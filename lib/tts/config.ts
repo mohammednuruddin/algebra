@@ -14,22 +14,23 @@ const DEFAULT_ELEVENLABS_MODEL_ID = 'eleven_turbo_v2_5';
 
 export function resolveDefaultTtsProvider(): TtsProvider {
   const requested = process.env.TTS_PROVIDER?.trim().toLowerCase();
+  const hasElevenLabs = Boolean(process.env.ELEVENLABS_API_KEY);
+  const hasInworld = Boolean(process.env.INWORLD_API_KEY);
 
-  if (requested === 'elevenlabs' && process.env.ELEVENLABS_API_KEY) {
-    return 'elevenlabs';
-  }
-
-  if (requested === 'inworld' && process.env.INWORLD_API_KEY) {
+  if (requested === 'inworld' && hasInworld) {
     return 'inworld';
   }
 
-  // Prefer ElevenLabs when both keys are available (more reliable)
-  if (process.env.ELEVENLABS_API_KEY) {
+  if (requested === 'elevenlabs' && hasElevenLabs) {
     return 'elevenlabs';
   }
 
-  if (process.env.INWORLD_API_KEY) {
+  if (hasInworld) {
     return 'inworld';
+  }
+
+  if (hasElevenLabs) {
+    return 'elevenlabs';
   }
 
   return 'elevenlabs';

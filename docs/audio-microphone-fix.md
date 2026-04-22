@@ -30,28 +30,30 @@ const activeImage = (snapshot.mediaAssets || []).find((asset) => asset.id === sn
 **File Changed:** `components/tutor/tutor-shell.tsx` (line 41)
 
 ### Issue 2: TTS Not Playing
-**Root Cause:** TTS provider was set to `inworld` in `.env.local`, but Inworld TTS may have reliability issues. Since both Inworld and ElevenLabs API keys are available, switching to ElevenLabs for better reliability.
+**Root Cause:** An earlier runtime override forced ElevenLabs whenever both API keys were present. That ignored `TTS_PROVIDER=inworld` and made the server pick the wrong provider for this app's current setup.
 
-**Fix Applied:** Modified `lib/tts/config.ts` to prefer ElevenLabs when both API keys are available:
+**Fix Applied:** Modified `lib/tts/config.ts` so provider resolution now:
+1. Honors `TTS_PROVIDER` when the requested provider is configured
+2. Defaults to `inworld` when both providers are available
+3. Falls back to `elevenlabs` only when Inworld is unavailable
+
 ```typescript
-// Before
-if (process.env.INWORLD_API_KEY) {
-  return 'inworld';
-}
-return 'elevenlabs';
-
-// After
-// Prefer ElevenLabs when both keys are available (more reliable)
-if (process.env.ELEVENLABS_API_KEY) {
-  return 'elevenlabs';
-}
-if (process.env.INWORLD_API_KEY) {
-  return 'inworld';
-}
+// Resolution order
+if (requested === 'inworld' && hasInworld) return 'inworld';
+if (requested === 'elevenlabs' && hasElevenLabs) return 'elevenlabs';
+if (hasInworld) return 'inworld';
+if (hasElevenLabs) return 'elevenlabs';
 return 'elevenlabs';
 ```
 
-**File Changed:** `lib/tts/config.ts` (lines 26-35)
+**Before:** The runtime forced ElevenLabs whenever both keys existed:
+```typescript
+if (hasElevenLabs && hasInworld) {
+  return 'elevenlabs';
+}
+```
+
+**File Changed:** `lib/tts/config.ts`
 
 ### Issue 3: Microphone Connection Closed (Code 3007)
 **Symptom:** "Microphone connection closed (3007). Tap the mic to retry." error message after microphone works for some time.
@@ -104,14 +106,14 @@ Ensure:
 ## Testing Steps
 1. Restart the dev server (changes to TTS config require restart)
 2. Start a new lesson
-3. Verify TTS plays when lesson starts (should now use ElevenLabs)
+3. Verify TTS plays when lesson starts and the response header `X-TTS-Provider` resolves to `inworld` when both keys are present
 4. Check browser console for WebSocket close codes if microphone still fails
 5. Verify microphone connects and shows "Listening live..." status
 6. Test speaking to the AI
 
 ## Files Modified
 - `components/tutor/tutor-shell.tsx`: Added null check for mediaAssets (line 41)
-- `lib/tts/config.ts`: Prefer ElevenLabs over Inworld when both keys available (lines 26-35)
+- `lib/tts/config.ts`: Honor `TTS_PROVIDER` and default to Inworld when both keys are available
 - `components/tutor/tutor-voice-dock.tsx`: Added detailed error logging for WebSocket (lines 370-389)
 
 ## Verification

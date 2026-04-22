@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 
 import { searchLessonImages } from '@/lib/media/lesson-image-search';
-import { generateInitialTutorResponse, generateLessonPreparation } from '@/lib/tutor/model';
+import {
+  generateInitialTutorResponse,
+  generateLessonPreparation,
+  generateTutorIntakeTurn,
+} from '@/lib/tutor/model';
 import {
   applyTutorCommands,
   applyTutorMediaCommands,
@@ -15,13 +19,57 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as { topic?: string; learnerLevel?: string; prompt?: string };
     const topic = body.topic?.trim() || body.prompt?.trim() || '';
-    const learnerLevel = body.learnerLevel?.trim() || 'starting from scratch';
+    const learnerLevel = body.learnerLevel?.trim() || 'unknown';
+    const sessionId = `tutor_${randomUUID()}`;
 
     if (!topic) {
-      return NextResponse.json({ error: 'topic is required' }, { status: 400 });
+      const intakeResult = await generateTutorIntakeTurn({
+        stage: 'session_create',
+        history: [],
+        latestUserMessage: null,
+        topic: null,
+        learnerLevel: null,
+      });
+
+      const snapshot = createTutorSnapshot({
+        sessionId,
+        prompt: '',
+        lessonTopic: '',
+        learnerLevel: intakeResult.response.learnerLevel || 'unknown',
+        speech: intakeResult.response.speech,
+        awaitMode: intakeResult.response.awaitMode,
+        mediaAssets: [],
+        activeImageId: null,
+        canvas: createEmptyTutorCanvasState(),
+        turns: [
+          {
+            actor: 'tutor',
+            text: intakeResult.response.speech,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+        intake: {
+          status: 'active',
+          topic: intakeResult.response.topic,
+          learnerLevel: intakeResult.response.learnerLevel,
+        },
+        status: 'active',
+        speechRevision: 1,
+      });
+
+      return NextResponse.json(
+        {
+          snapshot,
+          ...(process.env.NODE_ENV === 'production' ? {} : { debug: intakeResult.debug }),
+        } satisfies TutorSessionCreateResponse,
+        {
+          headers: {
+            'Cache-Control': 'no-store, max-age=0, must-revalidate',
+          },
+        }
+      );
     }
 
-    const sessionId = `tutor_${randomUUID()}`;
     const preparation = await generateLessonPreparation({
       topic,
       learnerLevel,
@@ -54,9 +102,7 @@ export async function POST(request: NextRequest) {
       lessonTopic: topic,
       learnerLevel,
       lessonOutline: preparation.outline,
-      title: modelResult.response.title,
       speech: modelResult.response.speech,
-      helperText: modelResult.response.helperText,
       awaitMode: modelResult.response.awaitMode,
       mediaAssets: imageSearchResult.assets,
       activeImageId,
@@ -68,6 +114,7 @@ export async function POST(request: NextRequest) {
           createdAt: new Date().toISOString(),
         },
       ],
+      intake: null,
       status: canvasResult.sessionComplete ? 'completed' : modelResult.response.status,
       speechRevision: 1,
     });

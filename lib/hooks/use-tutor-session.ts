@@ -46,42 +46,51 @@ export function useTutorSession() {
     saveGuestTutorSnapshot(snapshot);
   }, [snapshot]);
 
-  const startSession = useCallback(async (input: { topic: string; learnerLevel: string }) => {
-    setPhase('preparing');
-    setError(null);
+  const startSession = useCallback(
+    async (
+      input: {
+        topic?: string;
+        learnerLevel?: string;
+        prompt?: string;
+      } = {}
+    ) => {
+      setPhase('preparing');
+      setError(null);
 
-    try {
-      const response = await fetch('/api/tutor/session/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(input),
-      });
+      try {
+        const response = await fetch('/api/tutor/session/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(input),
+        });
 
-      const payload = (await response.json()) as TutorSessionCreateResponse & { error?: string };
+        const payload = (await response.json()) as TutorSessionCreateResponse & { error?: string };
 
-      if (!response.ok || !payload.snapshot) {
-        throw new Error(payload.error || 'Failed to prepare the tutor session');
+        if (!response.ok || !payload.snapshot) {
+          throw new Error(payload.error || 'Failed to prepare the tutor session');
+        }
+
+        logTutorDebug('session_create', payload.debug);
+
+        setSnapshot(payload.snapshot);
+        setPhase('live');
+        return payload.snapshot;
+      } catch (nextError) {
+        setPhase('error');
+        setError(nextError instanceof Error ? nextError.message : 'Failed to prepare the tutor session');
+        throw nextError;
       }
-
-      logTutorDebug('session_create', payload.debug);
-
-      setSnapshot(payload.snapshot);
-      setPhase('live');
-      return payload.snapshot;
-    } catch (nextError) {
-      setPhase('error');
-      setError(nextError instanceof Error ? nextError.message : 'Failed to prepare the tutor session');
-      throw nextError;
-    }
-  }, []);
+    },
+    []
+  );
 
   const submitTranscript = useCallback(
     async (transcript: string) => {
       const activeSnapshot = snapshot;
       if (!activeSnapshot || !transcript.trim() || isSubmittingTurn) {
-        return;
+        return false;
       }
 
       setIsSubmittingTurn(true);
@@ -108,6 +117,7 @@ export function useTutorSession() {
         logTutorDebug('turn', payload.debug);
 
         setSnapshot(payload.snapshot);
+        return true;
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : 'Failed to continue the tutor session');
         throw nextError;

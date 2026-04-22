@@ -1,4 +1,5 @@
 import { buildOpenRouterRequest } from '@/lib/ai/openrouter';
+import { shouldAutoStartTutorLesson } from '@/lib/tutor/intake-heuristics';
 import type {
   TutorAwaitMode,
   TutorCanvasCommand,
@@ -8,9 +9,7 @@ import type {
 } from '@/lib/types/tutor';
 
 export interface TutorModelResponse {
-  title: string;
   speech: string;
-  helperText: string | null;
   awaitMode: TutorAwaitMode;
   commands: TutorCanvasCommand[];
   sessionComplete: boolean;
@@ -22,8 +21,20 @@ export interface TutorModelResult {
   debug: TutorLlmDebugTrace;
 }
 
+export interface TutorIntakeResponse {
+  speech: string;
+  awaitMode: TutorAwaitMode;
+  readyToStartLesson: boolean;
+  topic: string | null;
+  learnerLevel: string | null;
+}
+
+export interface TutorIntakeResult {
+  response: TutorIntakeResponse;
+  debug: TutorLlmDebugTrace;
+}
+
 interface TutorLessonPreparation {
-  title: string;
   openingSpeech: string;
   outline: string[];
   imageSearchQuery: string;
@@ -35,6 +46,11 @@ type TutorMessage = {
   content: string;
 };
 
+type Sanitized<T> = {
+  response: T;
+  issues: string[];
+};
+
 function preview(value: string, limit = 1200) {
   return value.length > limit ? `${value.slice(0, limit)}...` : value;
 }
@@ -43,16 +59,70 @@ function trimmed(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
-function parseJson(text: string) {
-  return JSON.parse(text.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim()) as unknown;
-}
+function extractJsonCandidate(text: string) {
+  const trimmedText = text.trim();
+  const unfenced = trimmedText
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
 
-function sanitizeAwaitMode(value: unknown): TutorAwaitMode {
-  if (value === 'voice') {
-    return 'voice';
+  if (unfenced.startsWith('{') || unfenced.startsWith('[')) {
+    return unfenced;
   }
 
-  return 'voice_or_canvas';
+  const firstBrace = unfenced.indexOf('{');
+  const lastBrace = unfenced.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return unfenced.slice(firstBrace, lastBrace + 1);
+  }
+
+  const firstBracket = unfenced.indexOf('[');
+  const lastBracket = unfenced.lastIndexOf(']');
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    return unfenced.slice(firstBracket, lastBracket + 1);
+  }
+
+  return unfenced;
+}
+
+function parseJson(text: string) {
+  return JSON.parse(extractJsonCandidate(text)) as unknown;
+}
+
+function formatDebugValue(value: unknown) {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function sanitizeAwaitMode(
+  value: unknown,
+  fallbackMode: TutorAwaitMode
+): { awaitMode: TutorAwaitMode; issue: string | null } {
+  if (value === 'voice') {
+    return {
+      awaitMode: 'voice',
+      issue: null,
+    };
+  }
+
+  if (value === 'voice_or_canvas') {
+    return {
+      awaitMode: 'voice_or_canvas',
+      issue: null,
+    };
+  }
+
+  return {
+    awaitMode: fallbackMode,
+    issue: `Invalid awaitMode ${formatDebugValue(value)} normalized to ${fallbackMode}`,
+  };
 }
 
 function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
@@ -179,7 +249,7 @@ function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
   return commands;
 }
 
-function sanitizeTutorResponse(value: unknown): TutorModelResponse | null {
+function sanitizeTutorResponse(value: unknown): Sanitized<TutorModelResponse> | null {
   if (!value || typeof value !== 'object') {
     return null;
   }
@@ -191,14 +261,64 @@ function sanitizeTutorResponse(value: unknown): TutorModelResponse | null {
     return null;
   }
 
+  const commands = sanitizeCommands(record.commands);
+  const fallbackAwaitMode = commands.length > 0 ? 'voice_or_canvas' : 'voice';
+  const awaitMode = sanitizeAwaitMode(record.awaitMode, fallbackAwaitMode);
+
   return {
-    title: trimmed(record.title, 'Live tutor'),
-    speech,
-    helperText: trimmed(record.helperText) || null,
-    awaitMode: sanitizeAwaitMode(record.awaitMode),
-    commands: sanitizeCommands(record.commands),
-    sessionComplete: record.sessionComplete === true,
-    status: record.sessionComplete === true ? 'completed' : 'active',
+    response: {
+      speech,
+      awaitMode: awaitMode.awaitMode,
+      commands,
+      sessionComplete: record.sessionComplete === true,
+      status: record.sessionComplete === true ? 'completed' : 'active',
+    },
+    issues: awaitMode.issue ? [awaitMode.issue] : [],
+  };
+}
+
+function sanitizeTutorIntakeResponse(
+  value: unknown,
+  context: { latestUserMessage?: string | null }
+): Sanitized<TutorIntakeResponse> | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const speech = trimmed(record.speech);
+
+  if (!speech) {
+    return null;
+  }
+
+  const topic = trimmed(record.topic) || null;
+  const learnerLevel = trimmed(record.learnerLevel) || null;
+  const awaitMode = sanitizeAwaitMode(record.awaitMode, 'voice');
+  const issues = awaitMode.issue ? [awaitMode.issue] : [];
+  let readyToStartLesson = record.readyToStartLesson === true && Boolean(topic);
+
+  if (
+    !readyToStartLesson &&
+    shouldAutoStartTutorLesson({
+      topic,
+      learnerLevel,
+      latestUserMessage: context.latestUserMessage,
+    })
+  ) {
+    readyToStartLesson = true;
+    issues.push('Promoted readyToStartLesson from tutor intake heuristics');
+  }
+
+  return {
+    response: {
+      speech,
+      awaitMode: awaitMode.awaitMode,
+      readyToStartLesson,
+      topic,
+      learnerLevel,
+    },
+    issues,
   };
 }
 
@@ -280,20 +400,21 @@ async function callModel(
     return null;
   }
 
+  const issues = sanitized.issues;
   const debug: TutorLlmDebugTrace = {
     stage,
     messages,
     rawResponseText: text,
     rawModelContent: content,
     parsedResponse: parsed,
-    usedFallback: false,
-    fallbackReason: null,
+    usedFallback: issues.length > 0,
+    fallbackReason: issues.length > 0 ? issues.join('; ') : null,
   };
 
   logTutorDebug(debug);
 
   return {
-    response: sanitized,
+    response: sanitized.response,
     debug,
   };
 }
@@ -324,9 +445,7 @@ function buildEquationFallback(prompt: string): TutorModelResponse {
   const wrongC = String(Math.max(left + right - 3, 1));
 
   return {
-    title: 'Live tutor',
-    speech: `We are starting live. Look at the board and talk me through how you would solve ${left} plus ${right}.`,
-    helperText: 'Use the canvas and explain your thinking out loud.',
+    speech: `Let’s start. How would you solve ${left} plus ${right}? Talk me through it.`,
     awaitMode: 'voice_or_canvas',
     sessionComplete: false,
     status: 'active',
@@ -358,9 +477,7 @@ export function buildInitialTutorFallback(prompt: string): TutorModelResponse {
   const words = buildTokenWords(prompt);
 
   return {
-    title: 'Live tutor',
-    speech: `I prepared a live workspace for ${prompt.trim()}. Start arranging the board while you tell me what you already know.`,
-    helperText: 'Move the cards, then speak naturally.',
+    speech: `Let’s begin with ${prompt.trim()}. Move the board pieces and tell me what you already know.`,
     awaitMode: 'voice_or_canvas',
     sessionComplete: false,
     status: 'active',
@@ -383,9 +500,164 @@ export function buildInitialTutorFallback(prompt: string): TutorModelResponse {
   };
 }
 
+function buildTutorIntakeFallback(args: {
+  topic?: string | null;
+  learnerLevel?: string | null;
+  latestUserMessage?: string | null;
+}): TutorIntakeResponse {
+  const topic = trimmed(args.topic) || null;
+  const learnerLevel = trimmed(args.learnerLevel) || null;
+
+  if (
+    topic &&
+    shouldAutoStartTutorLesson({
+      topic,
+      learnerLevel,
+      latestUserMessage: args.latestUserMessage,
+    })
+  ) {
+    return {
+      speech: `Let’s start with ${topic}. What do you already know about it?`,
+      awaitMode: 'voice',
+      readyToStartLesson: true,
+      topic,
+      learnerLevel,
+    };
+  }
+
+  if (topic) {
+    return {
+      speech: `We can work on ${topic}. What part would you like to understand first?`,
+      awaitMode: 'voice',
+      readyToStartLesson: false,
+      topic,
+      learnerLevel,
+    };
+  }
+
+  return {
+    speech: 'What would you like to learn today?',
+    awaitMode: 'voice',
+    readyToStartLesson: false,
+    topic: null,
+    learnerLevel,
+  };
+}
+
+export async function generateTutorIntakeTurn(args: {
+  stage: TutorLlmDebugTrace['stage'];
+  history: Array<{ actor: 'user' | 'tutor'; text: string }>;
+  latestUserMessage?: string | null;
+  topic?: string | null;
+  learnerLevel?: string | null;
+}): Promise<TutorIntakeResult> {
+  const historyText = args.history.length
+    ? args.history.map((turn) => `${turn.actor}: ${turn.text}`).join('\n')
+    : 'No conversation yet.';
+
+  const messages: TutorMessage[] = [
+    {
+      role: 'system',
+      content:
+        'You are the opening intake for a live AI tutor. Return strict JSON only with keys speech, awaitMode, readyToStartLesson, topic, learnerLevel. awaitMode must be exactly "voice" or "voice_or_canvas" and nothing else. Keep the tone natural, brief, and interactive. Prefer one short sentence or one short question at a time. Ask at most one useful follow-up question at a time. Do not ask motivation questions like whether this is for class, curiosity, gardening, work, or personal interest unless the learner explicitly brings that up. Infer learnerLevel from the learner wording whenever possible instead of forcing a separate questionnaire. If the learner has already given you the topic and a rough level, start the lesson immediately. If the learner asks a direct content question, start the lesson immediately. Set readyToStartLesson true only when you know the lesson topic well enough to begin teaching immediately. topic should be a concise normalized lesson topic or null if still unclear. learnerLevel should be a short phrase like beginner, some familiarity, or null if still unknown. Never mention setup screens, stages, forms, titles, or labels.',
+    },
+    {
+      role: 'user',
+      content: `Known topic: ${args.topic || 'unknown'}\nKnown learner level: ${args.learnerLevel || 'unknown'}\nLatest learner message: ${args.latestUserMessage || 'none'}\nConversation so far:\n${historyText}\n\nReturn the next intake turn. If you have enough context to start teaching, set readyToStartLesson true.`,
+    },
+  ];
+  let rawResponseText: string | null = null;
+  let rawModelContent: string | null = null;
+  let parsedResponse: unknown = null;
+
+  try {
+    const outbound = buildOpenRouterRequest({
+      messages,
+      response_format: { type: 'json_object' },
+      temperature: 0.3,
+      max_tokens: 700,
+    });
+
+    const response = await fetch(outbound.url, {
+      method: 'POST',
+      headers: outbound.headers,
+      body: JSON.stringify(outbound.body),
+    });
+
+    const text = await response.text();
+    rawResponseText = text;
+
+    if (!response.ok) {
+      throw new Error(`Tutor intake failed (${response.status}): ${preview(text)}`);
+    }
+
+    const payload = parseJson(text) as {
+      choices?: Array<{
+        message?: {
+          content?: string;
+        };
+      }>;
+    };
+    const content = payload.choices?.[0]?.message?.content;
+    rawModelContent = content || null;
+    if (!content) {
+      throw new Error('Tutor intake returned no content');
+    }
+
+    const parsed = parseJson(content);
+    parsedResponse = parsed;
+    const sanitized = sanitizeTutorIntakeResponse(parsed, {
+      latestUserMessage: args.latestUserMessage,
+    });
+
+    if (!sanitized) {
+      throw new Error('Tutor intake returned invalid JSON');
+    }
+
+    const issues = sanitized.issues;
+    const debug: TutorLlmDebugTrace = {
+      stage: args.stage,
+      messages,
+      rawResponseText,
+      rawModelContent,
+      parsedResponse,
+      usedFallback: issues.length > 0,
+      fallbackReason: issues.length > 0 ? issues.join('; ') : null,
+    };
+
+    logTutorDebug(debug);
+
+    return {
+      response: sanitized.response,
+      debug,
+    };
+  } catch (error) {
+    const fallback: TutorIntakeResult = {
+      response: buildTutorIntakeFallback({
+        topic: args.topic,
+        learnerLevel: args.learnerLevel,
+        latestUserMessage: args.latestUserMessage,
+      }),
+      debug: {
+        stage: args.stage,
+        messages,
+        rawResponseText,
+        rawModelContent,
+        parsedResponse,
+        usedFallback: true,
+        fallbackReason:
+          error instanceof Error ? error.message : 'Unknown tutor intake error',
+      },
+    };
+
+    logTutorDebug(fallback.debug);
+
+    return fallback;
+  }
+}
+
 function buildLessonPreparationFallback(input: { topic: string; learnerLevel: string }): TutorLessonPreparation {
   return {
-    title: input.topic,
     openingSpeech: `Alright. I am preparing ${input.topic} for someone who is ${input.learnerLevel}.`,
     outline: [
       'Start from what the learner already knows.',
@@ -408,9 +680,7 @@ export function buildTurnTutorFallback(args: {
 
   if (/(done|i get it|i understand|finished|that makes sense)/i.test(lower)) {
     return {
-      title: 'Live tutor',
-      speech: 'Nice work. You have enough to move on, so I am wrapping this round here.',
-      helperText: 'Session complete.',
+      speech: 'Nice work. You have enough to move on, so I’m wrapping this round here.',
       awaitMode: 'voice',
       sessionComplete: true,
       status: 'completed',
@@ -419,9 +689,7 @@ export function buildTurnTutorFallback(args: {
   }
 
   return {
-    title: 'Live tutor',
-    speech: `Good. Keep using the board and tighten the explanation. Right now I see: ${args.canvasSummary}`,
-    helperText: 'Say the next step clearly while you work the board.',
+    speech: `Good. Keep going. Right now I see: ${args.canvasSummary}`,
     awaitMode: 'voice_or_canvas',
     sessionComplete: false,
     status: 'active',
@@ -437,7 +705,7 @@ export async function generateLessonPreparation(input: {
     {
       role: 'system',
       content:
-        'You are preparing a conversational lesson. Return strict JSON only with keys title, openingSpeech, outline, imageSearchQuery, desiredImageCount. The lesson should be speech-first and fluid, not a task list. desiredImageCount must be an integer from 0 to 4. Ask for images only if they will genuinely help later explanation.',
+        'You are preparing a conversational lesson. Return strict JSON only with keys openingSpeech, outline, imageSearchQuery, desiredImageCount. The lesson should be speech-first and fluid, not a task list. desiredImageCount must be an integer from 0 to 4. Ask for images only if they will genuinely help later explanation. Do not generate titles or labels.',
     },
     {
       role: 'user',
@@ -473,7 +741,6 @@ export async function generateLessonPreparation(input: {
 
     const parsed = parseStructured<Record<string, unknown>>(content);
     return {
-      title: trimmed(parsed.title, input.topic),
       openingSpeech: trimmed(parsed.openingSpeech, `I am preparing ${input.topic} now.`),
       outline: Array.isArray(parsed.outline)
         ? parsed.outline
@@ -508,7 +775,7 @@ export async function generateInitialTutorResponse(input: {
     {
       role: 'system',
       content:
-        'You are preparing the opening turn for a speech-first live tutor. Return strict JSON only with keys title, speech, helperText, awaitMode, sessionComplete, commands. Use awaitMode values voice or voice_or_canvas only. Every command object must use a key named type, never command. Allowed commands are set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, complete_session. For set_headline use a headline field. For set_instruction use an instruction field. For set_zones use zones with id, label, optional hint, optional color, and optional count. If you want visible movable objects, either emit explicit set_tokens tokens or provide zone count values so tokens can be generated. Keep the lesson conversational, not task-list driven. Only use image or canvas commands when they genuinely help understanding.',
+        'You are preparing the opening turn for a speech-first live tutor. Return strict JSON only with keys speech, awaitMode, sessionComplete, commands. Use awaitMode values voice or voice_or_canvas only. Every command object must use a key named type, never command. Allowed commands are set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, complete_session. For set_headline use a headline field. For set_instruction use an instruction field. For set_zones use zones with id, label, optional hint, optional color, and optional count. If you want visible movable objects, either emit explicit set_tokens tokens or provide zone count values so tokens can be generated. Keep the lesson conversational, brief, and interactive. Prefer one short explanation beat followed by a question or action cue. Do not dump long lectures. Only use image or canvas commands when they genuinely help understanding. Do not generate titles or labels outside canvas commands.',
     },
     {
       role: 'user',
@@ -563,7 +830,7 @@ export async function generateTutorTurn(args: {
     {
       role: 'system',
       content:
-        'You are the live tutor inside a minimal speech-and-canvas product. Return strict JSON only with keys title, speech, helperText, awaitMode, sessionComplete, commands. Use awaitMode values voice or voice_or_canvas only. Every command object must use a key named type, never command. Allowed commands are set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, complete_session. For set_headline use a headline field. For set_instruction use an instruction field. For set_zones use zones with id, label, optional hint, optional color, and optional count. If you want visible movable objects, either emit explicit set_tokens tokens or provide zone count values so tokens can be generated. Keep this lesson conversational, explanatory, and continuous. Use image or canvas commands only when they help the explanation.',
+        'You are the live tutor inside a minimal speech-and-canvas product. Return strict JSON only with keys speech, awaitMode, sessionComplete, commands. Use awaitMode values voice or voice_or_canvas only. Every command object must use a key named type, never command. Allowed commands are set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, complete_session. For set_headline use a headline field. For set_instruction use an instruction field. For set_zones use zones with id, label, optional hint, optional color, and optional count. If you want visible movable objects, either emit explicit set_tokens tokens or provide zone count values so tokens can be generated. Keep this lesson conversational, brief, and interactive. Prefer one short explanation step, then hand back to the learner. Do not dump long lectures. Use image or canvas commands only when they help the explanation. Do not generate titles or labels outside canvas commands.',
     },
     {
       role: 'user',

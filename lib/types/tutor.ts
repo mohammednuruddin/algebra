@@ -54,6 +54,12 @@ export interface TutorCanvasState {
   equation: TutorEquationState | null;
 }
 
+export interface TutorIntakeState {
+  status: 'active' | 'complete';
+  topic: string | null;
+  learnerLevel: string | null;
+}
+
 export type TutorCanvasCommand =
   | {
       type: 'set_mode';
@@ -118,16 +124,15 @@ export interface TutorRuntimeSnapshot {
   lessonTopic: string;
   learnerLevel: string;
   lessonOutline: string[];
-  title: string;
   status: TutorSessionStatus;
   speech: string;
-  helperText: string | null;
   awaitMode: TutorAwaitMode;
   speechRevision: number;
   mediaAssets: TutorMediaAsset[];
   activeImageId: string | null;
   canvas: TutorCanvasState;
   turns: TutorTurn[];
+  intake: TutorIntakeState | null;
 }
 
 export interface TutorLlmDebugTrace {

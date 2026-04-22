@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from 'react';
 
+const TTS_REQUEST_TIMEOUT_MS = 15000;
+
 interface TutorVoicePlayerProps {
   text: string;
   voiceId: string;
@@ -9,6 +11,8 @@ interface TutorVoicePlayerProps {
   modelId: string;
   enabled: boolean;
   playToken: number;
+  stopSignal?: number;
+  onRequestStart?: () => void;
   onStart?: () => void;
   onComplete?: () => void;
   onError?: (error: Error) => void;
@@ -21,18 +25,20 @@ export function TutorVoicePlayer({
   modelId,
   enabled,
   playToken,
+  stopSignal,
+  onRequestStart,
   onStart,
   onComplete,
   onError,
 }: TutorVoicePlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
-  const handlersRef = useRef({ onStart, onComplete, onError });
+  const handlersRef = useRef({ onRequestStart, onStart, onComplete, onError });
   const lastPlayKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    handlersRef.current = { onStart, onComplete, onError };
-  }, [onComplete, onError, onStart]);
+    handlersRef.current = { onRequestStart, onStart, onComplete, onError };
+  }, [onComplete, onError, onRequestStart, onStart]);
 
   useEffect(() => {
     if (!enabled || !text.trim()) {
@@ -46,16 +52,46 @@ export function TutorVoicePlayer({
     lastPlayKeyRef.current = playKey;
 
     let cancelled = false;
+    let settled = false;
+    let requestTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    const abortController = new AbortController();
+
+    const clearRequestTimeout = () => {
+      if (requestTimeoutId) {
+        clearTimeout(requestTimeoutId);
+        requestTimeoutId = null;
+      }
+    };
+
+    const settlePlayback = (outcome: 'complete' | 'error', error?: Error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearRequestTimeout();
+
+      if (outcome === 'complete') {
+        handlersRef.current.onComplete?.();
+        return;
+      }
+
+      handlersRef.current.onError?.(error || new Error('Audio playback failed'));
+    };
 
     const play = async () => {
       try {
-        handlersRef.current.onStart?.();
+        handlersRef.current.onRequestStart?.();
+        requestTimeoutId = setTimeout(() => {
+          abortController.abort(new Error('Tutor audio request timed out'));
+        }, TTS_REQUEST_TIMEOUT_MS);
 
         const response = await fetch('/api/tts', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
+          signal: abortController.signal,
           body: JSON.stringify({
             text,
             provider,
@@ -92,12 +128,28 @@ export function TutorVoicePlayer({
 
         const audio = new Audio(url);
         audioRef.current = audio;
-        audio.onended = () => handlersRef.current.onComplete?.();
-        audio.onerror = () => handlersRef.current.onError?.(new Error('Audio playback failed'));
+        audio.preload = 'auto';
+        audio.onended = () => {
+          audioRef.current = null;
+          settlePlayback('complete');
+        };
+        audio.onerror = () => {
+          audioRef.current = null;
+          settlePlayback('error', new Error('Audio playback failed'));
+        };
         await audio.play();
+        if (cancelled) {
+          audio.pause();
+          audioRef.current = null;
+          settlePlayback('complete');
+          return;
+        }
+
+        handlersRef.current.onStart?.();
       } catch (error) {
         if (!cancelled) {
-          handlersRef.current.onError?.(
+          settlePlayback(
+            'error',
             error instanceof Error ? error : new Error('Audio playback failed')
           );
         }
@@ -108,9 +160,15 @@ export function TutorVoicePlayer({
 
     return () => {
       cancelled = true;
+      abortController.abort();
+      clearRequestTimeout();
       if (audioRef.current) {
+        audioRef.current.onended = null;
+        audioRef.current.onerror = null;
         audioRef.current.pause();
+        audioRef.current = null;
       }
+      settlePlayback('complete');
     };
   }, [enabled, modelId, playToken, provider, text, voiceId]);
 
@@ -124,6 +182,18 @@ export function TutorVoicePlayer({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!audioRef.current) {
+      return;
+    }
+
+    audioRef.current.pause();
+    audioRef.current.onended = null;
+    audioRef.current.onerror = null;
+    audioRef.current = null;
+    handlersRef.current.onComplete?.();
+  }, [stopSignal]);
 
   return null;
 }

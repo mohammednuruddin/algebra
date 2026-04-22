@@ -210,14 +210,13 @@ export function createTutorSnapshot(input: {
   lessonTopic?: string;
   learnerLevel?: string;
   lessonOutline?: string[];
-  title: string;
   speech: string;
-  helperText?: string | null;
   awaitMode?: TutorAwaitMode;
   mediaAssets?: TutorMediaAsset[];
   activeImageId?: string | null;
   canvas: TutorCanvasState;
   turns?: TutorRuntimeSnapshot['turns'];
+  intake?: TutorRuntimeSnapshot['intake'];
   status?: TutorRuntimeSnapshot['status'];
   speechRevision?: number;
 }) {
@@ -227,16 +226,15 @@ export function createTutorSnapshot(input: {
     lessonTopic: input.lessonTopic || input.prompt,
     learnerLevel: input.learnerLevel || 'unknown',
     lessonOutline: input.lessonOutline || [],
-    title: input.title,
     status: input.status || 'active',
     speech: input.speech,
-    helperText: input.helperText ?? null,
     awaitMode: input.awaitMode || 'voice_or_canvas',
     speechRevision: input.speechRevision ?? 1,
     mediaAssets: input.mediaAssets || [],
     activeImageId: input.activeImageId ?? null,
     canvas: input.canvas,
     turns: input.turns || [],
+    intake: input.intake ?? null,
   } satisfies TutorRuntimeSnapshot;
 }
 
