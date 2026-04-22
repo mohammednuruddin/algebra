@@ -134,13 +134,20 @@ export function appendGuestLessonTurn(
 export function listGuestHistoryItems(): GuestHistoryItem[] {
   return listGuestLessons()
     .filter((lesson) => lesson.article)
-    .map((lesson) => ({
-      id: lesson.article!.id,
-      title: lesson.article!.title,
-      created_at: lesson.article!.created_at,
-      metadata_json:
-        (lesson.article!.metadata_json as GuestHistoryItem['metadata_json']) ?? null,
-    }));
+    .map((lesson) => {
+      const metadata = (lesson.article!.metadata_json as GuestHistoryItem['metadata_json']) ?? {};
+      const firstImageUrl = metadata.first_image_url || lesson.mediaAssets?.[0]?.url;
+
+      return {
+        id: lesson.article!.id,
+        title: lesson.article!.title,
+        created_at: lesson.article!.created_at,
+        metadata_json: {
+          ...metadata,
+          first_image_url: firstImageUrl,
+        },
+      };
+    });
 }
 
 export function getGuestArticle(articleId: string) {

@@ -4,6 +4,11 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { TutorShell } from '@/components/tutor/tutor-shell';
 import { useTutorSession } from '@/lib/hooks/use-tutor-session';
+import type {
+  TutorCanvasEvidence,
+  TutorCanvasInteraction,
+  TutorCodeExecutionResult,
+} from '@/lib/types/tutor';
 
 
 type RuntimeConfig = {
@@ -41,6 +46,34 @@ export function TutorExperience() {
   const [teacherAudioPending, setTeacherAudioPending] = useState(false);
   const [teacherStopSignal, setTeacherStopSignal] = useState(0);
 
+  const submitTranscript = useCallback(
+    async (
+      transcript: string,
+      options?: {
+        canvasEvidence?: TutorCanvasEvidence | null;
+        canvasInteraction?: TutorCanvasInteraction | null;
+      }
+    ) => {
+      if (!transcript.trim()) {
+        return;
+      }
+
+      setTeacherSpeaking(false);
+      setTeacherAudioPending(true);
+
+      try {
+        const submitted = await submitTutorTranscript(transcript, options);
+        if (!submitted) {
+          setTeacherAudioPending(false);
+        }
+      } catch (nextError) {
+        setTeacherAudioPending(false);
+        throw nextError;
+      }
+    },
+    [submitTutorTranscript]
+  );
+
   const startSession = useCallback(
     async (
       input: {
@@ -62,48 +95,187 @@ export function TutorExperience() {
     [startTutorSession]
   );
 
-  const submitTranscript = useCallback(
-    async (transcript: string) => {
-      if (!transcript.trim()) {
-        return;
-      }
-
-      setTeacherSpeaking(false);
-      setTeacherAudioPending(true);
-
-      try {
-        const submitted = await submitTutorTranscript(transcript);
-        if (!submitted) {
-          setTeacherAudioPending(false);
-        }
-      } catch (nextError) {
-        setTeacherAudioPending(false);
-        throw nextError;
-      }
-    },
-    [submitTutorTranscript]
-  );
-
   const handleFillBlankSubmit = useCallback(
     (answers: Record<string, string>) => {
-      const summary = Object.entries(answers)
-        .map(([, value]) => value)
-        .join(', ');
-      void submitTranscript(`[Fill-in-the-blank answers: ${summary}]`);
+      const canvasInteraction: TutorCanvasInteraction = {
+        mode: 'fill_blank',
+        answers,
+      };
+      void submitTranscript(
+        `[Canvas interaction: fill_blank] ${JSON.stringify({ answers })}`,
+        { canvasInteraction }
+      );
     },
     [submitTranscript]
   );
 
   const handleCodeSubmit = useCallback(
-    (code: string) => {
-      void submitTranscript(`[Code submission]\n${code}`);
+    (code: string, result: TutorCodeExecutionResult) => {
+      const canvasInteraction: TutorCanvasInteraction = {
+        mode: 'code_block',
+        code,
+        execution: result,
+      };
+      void submitTranscript(
+        `[Canvas interaction: code_block] ${JSON.stringify({
+          code,
+          execution: result,
+        })}`,
+        { canvasInteraction }
+      );
     },
     [submitTranscript]
   );
 
   const handleCanvasSubmit = useCallback(
     (mode: string, data: unknown) => {
-      void submitTranscript(`[Canvas interaction: ${mode}] ${JSON.stringify(data)}`);
+      if (
+        mode === 'drawing' &&
+        data &&
+        typeof data === 'object' &&
+        typeof (data as { dataUrl?: unknown }).dataUrl === 'string'
+      ) {
+        const canvasInteraction: TutorCanvasInteraction = {
+          mode: 'drawing',
+          summary: 'Learner submitted a marked image for review.',
+          strokeColors: Array.isArray((data as { strokeColors?: unknown }).strokeColors)
+            ? ((data as { strokeColors: string[] }).strokeColors)
+            : undefined,
+          strokeCount:
+            typeof (data as { strokeCount?: unknown }).strokeCount === 'number'
+              ? (data as { strokeCount: number }).strokeCount
+              : undefined,
+        };
+        void submitTranscript(
+          `[Canvas interaction: drawing] ${JSON.stringify({
+            summary: canvasInteraction.summary,
+            strokeColors: canvasInteraction.strokeColors,
+            strokeCount: canvasInteraction.strokeCount,
+          })}`,
+          {
+            canvasInteraction,
+            canvasEvidence: {
+              mode: 'drawing',
+              summary: 'Learner submitted a marked image for review.',
+              dataUrl: (data as { dataUrl: string }).dataUrl,
+              overlayDataUrl:
+                typeof (data as { overlayDataUrl?: unknown }).overlayDataUrl === 'string'
+                  ? (data as { overlayDataUrl: string }).overlayDataUrl
+                  : undefined,
+              strokeColors: Array.isArray((data as { strokeColors?: unknown }).strokeColors)
+                ? ((data as { strokeColors: string[] }).strokeColors)
+                : undefined,
+              strokeCount:
+                typeof (data as { strokeCount?: unknown }).strokeCount === 'number'
+                  ? (data as { strokeCount: number }).strokeCount
+                  : undefined,
+              canvasWidth:
+                typeof (data as { canvasWidth?: unknown }).canvasWidth === 'number'
+                  ? (data as { canvasWidth: number }).canvasWidth
+                  : undefined,
+              canvasHeight:
+                typeof (data as { canvasHeight?: unknown }).canvasHeight === 'number'
+                  ? (data as { canvasHeight: number }).canvasHeight
+                  : undefined,
+            },
+          }
+        );
+        return;
+      }
+
+      let canvasInteraction: TutorCanvasInteraction | null = null;
+
+      if (data && typeof data === 'object') {
+        const payload = data as Record<string, unknown>;
+
+        switch (mode) {
+          case 'multiple_choice':
+            canvasInteraction = {
+              mode: 'multiple_choice',
+              selectedIds: Array.isArray(payload.selectedIds)
+                ? payload.selectedIds.filter(
+                    (value): value is string => typeof value === 'string'
+                  )
+                : [],
+            };
+            break;
+          case 'number_line':
+            canvasInteraction = {
+              mode: 'number_line',
+              value:
+                typeof payload.value === 'number' || payload.value === null
+                  ? (payload.value as number | null)
+                  : null,
+            };
+            break;
+          case 'table_grid':
+            canvasInteraction = {
+              mode: 'table_grid',
+              cells:
+                payload.cells && typeof payload.cells === 'object'
+                  ? (payload.cells as Record<string, string>)
+                  : {},
+            };
+            break;
+          case 'graph_plot':
+            canvasInteraction = {
+              mode: 'graph_plot',
+              points: Array.isArray(payload.userPoints)
+                ? payload.userPoints
+                    .filter(
+                      (point): point is { x: number; y: number } =>
+                        Boolean(point) &&
+                        typeof point === 'object' &&
+                        typeof (point as { x?: unknown }).x === 'number' &&
+                        typeof (point as { y?: unknown }).y === 'number'
+                    )
+                    .map((point) => ({ x: point.x, y: point.y }))
+                : [],
+            };
+            break;
+          case 'matching_pairs':
+            canvasInteraction = {
+              mode: 'matching_pairs',
+              userPairs: Array.isArray(payload.pairs)
+                ? payload.pairs
+                    .filter(
+                      (pair): pair is { leftId: string; rightId: string } =>
+                        Boolean(pair) &&
+                        typeof pair === 'object' &&
+                        typeof (pair as { leftId?: unknown }).leftId === 'string' &&
+                        typeof (pair as { rightId?: unknown }).rightId === 'string'
+                    )
+                    .map((pair) => ({ leftId: pair.leftId, rightId: pair.rightId }))
+                : [],
+            };
+            break;
+          case 'ordering':
+            canvasInteraction = {
+              mode: 'ordering',
+              userOrder: Array.isArray(payload.order)
+                ? payload.order.filter(
+                    (value): value is string => typeof value === 'string'
+                  )
+                : [],
+            };
+            break;
+          case 'text_response':
+            canvasInteraction =
+              typeof payload.text === 'string'
+                ? {
+                    mode: 'text_response',
+                    text: payload.text,
+                  }
+                : null;
+            break;
+          default:
+            break;
+        }
+      }
+
+      void submitTranscript(`[Canvas interaction: ${mode}] ${JSON.stringify(data)}`, {
+        canvasInteraction,
+      });
     },
     [submitTranscript]
   );

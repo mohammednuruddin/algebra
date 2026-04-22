@@ -1,6 +1,6 @@
 'use client';
 
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { TutorShell } from './tutor-shell';
@@ -9,6 +9,11 @@ import type { TutorRuntimeSnapshot } from '@/lib/types/tutor';
 const mockTutorVoiceDock = vi.fn((props: unknown) => {
   void props;
   return <div data-testid="voice-dock">voice dock</div>;
+});
+
+const mockTutorVoicePlayer = vi.fn((props: unknown) => {
+  void props;
+  return null;
 });
 
 vi.mock('@/components/tutor/tutor-canvas-host', () => ({
@@ -24,10 +29,10 @@ vi.mock('@/components/tutor/tutor-voice-dock', () => ({
 }));
 
 vi.mock('@/components/tutor/tutor-voice-player', () => ({
-  TutorVoicePlayer: () => null,
+  TutorVoicePlayer: (props: unknown) => mockTutorVoicePlayer(props),
 }));
 
-function buildSnapshot(): TutorRuntimeSnapshot {
+function buildSnapshot(overrides: Partial<TutorRuntimeSnapshot> = {}): TutorRuntimeSnapshot {
   return {
     sessionId: 'session-1',
     prompt: '',
@@ -64,6 +69,7 @@ function buildSnapshot(): TutorRuntimeSnapshot {
       topic: null,
       learnerLevel: null,
     },
+    ...overrides,
   };
 }
 
@@ -87,12 +93,17 @@ describe('TutorShell', () => {
       />
     );
 
+    fireEvent.click(screen.getByRole('button', { name: /enable voice and mic/i }));
+
     expect(mockTutorVoiceDock).toHaveBeenLastCalledWith(
-      expect.objectContaining({ teacherSpeaking: true })
+      expect.objectContaining({
+        teacherSpeaking: false,
+        teacherAudioPending: true,
+      })
     );
   });
 
-  it('shows the voice dock immediately without a separate unlock click', () => {
+  it('shows a one-tap unlock before arming voice controls', () => {
     render(
       <TutorShell
         snapshot={buildSnapshot()}
@@ -110,7 +121,218 @@ describe('TutorShell', () => {
       />
     );
 
+    expect(screen.getByRole('button', { name: /enable voice and mic/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('voice-dock')).not.toBeInTheDocument();
+    expect(mockTutorVoicePlayer).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false })
+    );
+  });
+
+  it('arms the current tutor turn after the learner unlocks browser voice controls', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot()}
+        speechToTextEnabled
+        voiceEnabled
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_turbo_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking={false}
+        onTeacherSpeakingChange={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /enable voice and mic/i }));
+
     expect(screen.getByTestId('voice-dock')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /enable voice and mic/i })).not.toBeInTheDocument();
+    expect(mockTutorVoicePlayer).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true })
+    );
+  });
+
+  it('pauses tutor playback during provisional barge-in and resumes it when rejected', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot()}
+        speechToTextEnabled
+        voiceEnabled
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_turbo_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking
+        onTeacherSpeakingChange={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /enable voice and mic/i }));
+
+    const dockProps = mockTutorVoiceDock.mock.lastCall?.[0] as {
+      onBargeInStart?: () => void;
+      onBargeInCancel?: () => void;
+    };
+
+    act(() => {
+      dockProps.onBargeInStart?.();
+    });
+
+    expect(mockTutorVoicePlayer).toHaveBeenLastCalledWith(
+      expect.objectContaining({ paused: true })
+    );
+
+    act(() => {
+      dockProps.onBargeInCancel?.();
+    });
+
+    expect(mockTutorVoicePlayer).toHaveBeenLastCalledWith(
+      expect.objectContaining({ paused: false })
+    );
+  });
+
+  it('does not render a blank canvas stage when the tutor is only speaking', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot({
+          intake: null,
+        })}
+        speechToTextEnabled={false}
+        voiceEnabled={false}
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_turbo_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking={false}
+        onTeacherSpeakingChange={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTestId('canvas-host')).not.toBeInTheDocument();
+  });
+
+  it('shows the active image in the stage area when the tutor references it', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot({
+          intake: null,
+          mediaAssets: [
+            {
+              id: 'img-1',
+              url: 'https://example.com/leaf.png',
+              altText: 'Leaf diagram',
+              description: 'Photosynthesis diagram',
+            },
+          ],
+          activeImageId: 'img-1',
+        })}
+        speechToTextEnabled={false}
+        voiceEnabled={false}
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_turbo_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking={false}
+        onTeacherSpeakingChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId('active-image-stage')).toBeInTheDocument();
+  });
+
+  it('hides the standalone image stage when drawing mode already owns the image', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot({
+          intake: null,
+          mediaAssets: [
+            {
+              id: 'img-1',
+              url: 'https://example.com/flower.png',
+              altText: 'Flower diagram',
+              description: 'Pollination diagram',
+            },
+          ],
+          activeImageId: 'img-1',
+          canvas: {
+            ...buildSnapshot().canvas,
+            mode: 'drawing',
+            drawing: {
+              prompt: 'Mark the anther.',
+              backgroundImageUrl: 'https://example.com/flower.png',
+              canvasWidth: 800,
+              canvasHeight: 600,
+              brushColor: '#000000',
+              brushSize: 3,
+              submitted: false,
+            },
+          },
+        })}
+        speechToTextEnabled={false}
+        voiceEnabled={false}
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_turbo_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking={false}
+        onTeacherSpeakingChange={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTestId('active-image-stage')).not.toBeInTheDocument();
+    expect(screen.getByTestId('canvas-host')).toBeInTheDocument();
+  });
+
+  it('keeps the interaction stage shrinkable so canvas work stays inside the viewport', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot({
+          intake: null,
+          canvas: {
+            ...buildSnapshot().canvas,
+            mode: 'code_block',
+            codeBlock: {
+              prompt: 'Write a print statement.',
+              language: 'python',
+              starterCode: 'print("hi")',
+              userCode: 'print("hi")',
+              expectedOutput: 'hi',
+              submitted: false,
+            },
+          },
+        })}
+        speechToTextEnabled={false}
+        voiceEnabled={false}
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_turbo_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking={false}
+        onTeacherSpeakingChange={vi.fn()}
+      />
+    );
+
+    const canvasHost = screen.getByTestId('canvas-host');
+
+    expect(canvasHost.parentElement).toHaveClass('min-w-0');
+    expect(canvasHost.parentElement?.parentElement).toHaveClass('min-w-0');
+    expect(canvasHost.parentElement?.parentElement).toHaveClass('overflow-x-hidden');
   });
 });

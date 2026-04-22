@@ -138,4 +138,122 @@ describe('TutorExperience', () => {
       expect.objectContaining({ teacherAudioPending: true })
     );
   });
+
+  it('forwards drawing submissions as multimodal canvas evidence', async () => {
+    const submitTranscript = vi.fn();
+
+    mockUseTutorSession.mockReturnValue({
+      snapshot: buildSnapshot(),
+      phase: 'live',
+      error: null,
+      isSubmittingTurn: false,
+      startSession: mockStartSession,
+      submitTranscript,
+      moveToken: vi.fn(),
+      chooseEquationAnswer: vi.fn(),
+    });
+
+    render(<TutorExperience />);
+
+    const props = mockTutorShell.mock.calls.at(-1)?.[0] as {
+      onCanvasSubmit?: (mode: string, data: unknown) => void;
+    };
+
+    props.onCanvasSubmit?.('drawing', { dataUrl: 'data:image/png;base64,mark' });
+
+    expect(submitTranscript).toHaveBeenCalledWith(
+      '[Canvas interaction: drawing] {"summary":"Learner submitted a marked image for review."}',
+      expect.objectContaining({
+        canvasInteraction: {
+          mode: 'drawing',
+          summary: 'Learner submitted a marked image for review.',
+          strokeColors: undefined,
+          strokeCount: undefined,
+        },
+        canvasEvidence: {
+          mode: 'drawing',
+          summary: 'Learner submitted a marked image for review.',
+          dataUrl: 'data:image/png;base64,mark',
+        },
+      })
+    );
+  });
+
+  it('forwards structured text-response submissions instead of flattening them into prose only', async () => {
+    const submitTranscript = vi.fn();
+
+    mockUseTutorSession.mockReturnValue({
+      snapshot: buildSnapshot(),
+      phase: 'live',
+      error: null,
+      isSubmittingTurn: false,
+      startSession: mockStartSession,
+      submitTranscript,
+      moveToken: vi.fn(),
+      chooseEquationAnswer: vi.fn(),
+    });
+
+    render(<TutorExperience />);
+
+    const props = mockTutorShell.mock.calls.at(-1)?.[0] as {
+      onCanvasSubmit?: (mode: string, data: unknown) => void;
+    };
+
+    props.onCanvasSubmit?.('text_response', { text: 'i dont know' });
+
+    expect(submitTranscript).toHaveBeenCalledWith(
+      '[Canvas interaction: text_response] {"text":"i dont know"}',
+      expect.objectContaining({
+        canvasInteraction: {
+          mode: 'text_response',
+          text: 'i dont know',
+        },
+      })
+    );
+  });
+
+  it('forwards code execution results so the tutor sees success or runtime errors', async () => {
+    const submitTranscript = vi.fn();
+
+    mockUseTutorSession.mockReturnValue({
+      snapshot: buildSnapshot(),
+      phase: 'live',
+      error: null,
+      isSubmittingTurn: false,
+      startSession: mockStartSession,
+      submitTranscript,
+      moveToken: vi.fn(),
+      chooseEquationAnswer: vi.fn(),
+    });
+
+    render(<TutorExperience />);
+
+    const props = mockTutorShell.mock.calls.at(-1)?.[0] as {
+      onCodeSubmit?: (
+        code: string,
+        result: { status: 'success' | 'error'; stdout: string; stderr: string }
+      ) => void;
+    };
+
+    props.onCodeSubmit?.('print(x)', {
+      status: 'error',
+      stdout: '',
+      stderr: 'NameError: name x is not defined',
+    });
+
+    expect(submitTranscript).toHaveBeenCalledWith(
+      '[Canvas interaction: code_block] {"code":"print(x)","execution":{"status":"error","stdout":"","stderr":"NameError: name x is not defined"}}',
+      expect.objectContaining({
+        canvasInteraction: {
+          mode: 'code_block',
+          code: 'print(x)',
+          execution: {
+            status: 'error',
+            stdout: '',
+            stderr: 'NameError: name x is not defined',
+          },
+        },
+      })
+    );
+  });
 });

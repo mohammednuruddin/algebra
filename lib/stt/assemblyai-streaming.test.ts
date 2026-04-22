@@ -13,8 +13,9 @@ describe('AssemblyAI streaming helpers', () => {
     expect(query.get('sample_rate')).toBe(String(ASSEMBLY_STREAM_SAMPLE_RATE));
     expect(query.get('speech_model')).toBe('u3-rt-pro');
     expect(query.get('format_turns')).toBe('true');
+    expect(query.get('end_of_turn_confidence_threshold')).toBe('0.4');
     expect(query.get('min_turn_silence')).toBe('160');
-    expect(query.get('max_turn_silence')).toBe('1000');
+    expect(query.get('max_turn_silence')).toBe('400');
     expect(query.has('min_end_of_turn_silence_when_confident')).toBe(false);
   });
 
@@ -38,12 +39,22 @@ describe('AssemblyAI streaming helpers', () => {
     ).toBe('hello there');
   });
 
-  it('does not finalize a transcript when the last word is still unstable', () => {
+  it('still trusts end_of_turn even if word metadata is missing or unstable', () => {
     expect(
       resolveAssemblyAiCompletedTranscript({
         type: 'Turn',
         transcript: 'how is',
         end_of_turn: true,
+        words: [{ word_is_final: false }],
+      })
+    ).toBe('how is');
+  });
+
+  it('does not finalize a non-final partial without end_of_turn', () => {
+    expect(
+      resolveAssemblyAiCompletedTranscript({
+        type: 'Turn',
+        transcript: 'how is',
         words: [{ word_is_final: false }],
       })
     ).toBeNull();

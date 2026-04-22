@@ -86,15 +86,20 @@ export async function POST(request: NextRequest) {
       imageAssets: imageSearchResult.assets,
       openingSpeech: preparation.openingSpeech,
     });
-    const canvasResult = applyTutorCommands(
-      createEmptyTutorCanvasState(),
-      modelResult.response.commands
-    );
     const activeImageId = applyTutorMediaCommands({
       currentActiveImageId: null,
       mediaAssets: imageSearchResult.assets,
       commands: modelResult.response.commands,
     });
+    const canvasResult = applyTutorCommands(
+      createEmptyTutorCanvasState(),
+      modelResult.response.commands,
+      {
+        canvasAction: modelResult.response.canvasAction,
+        mediaAssets: imageSearchResult.assets,
+        defaultImageId: activeImageId,
+      }
+    );
 
     const snapshot = createTutorSnapshot({
       sessionId,

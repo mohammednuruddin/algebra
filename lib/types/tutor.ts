@@ -1,6 +1,9 @@
+import type { OpenRouterContentPart } from '@/lib/ai/openrouter';
+
 export type TutorSessionStatus = 'preparing' | 'active' | 'completed';
 
 export type TutorAwaitMode = 'voice' | 'voice_or_canvas';
+export type TutorCanvasAction = 'keep' | 'replace' | 'clear';
 
 export type TutorCanvasMode =
   | 'distribution'
@@ -191,6 +194,7 @@ export interface TutorDrawingState {
   brushColor: string;
   brushSize: number;
   submitted: boolean;
+  sceneRevision?: number;
 }
 
 export interface TutorCanvasState {
@@ -217,6 +221,68 @@ export interface TutorIntakeState {
   topic: string | null;
   learnerLevel: string | null;
 }
+
+export interface TutorCanvasEvidence {
+  mode: string;
+  summary?: string;
+  dataUrl?: string;
+  overlayDataUrl?: string;
+  strokeColors?: string[];
+  strokeCount?: number;
+  canvasWidth?: number;
+  canvasHeight?: number;
+}
+
+export interface TutorCodeExecutionResult {
+  status: 'success' | 'error';
+  stdout: string;
+  stderr: string;
+}
+
+export type TutorCanvasInteraction =
+  | {
+      mode: 'fill_blank';
+      answers: Record<string, string>;
+    }
+  | {
+      mode: 'code_block';
+      code: string;
+      execution?: TutorCodeExecutionResult | null;
+    }
+  | {
+      mode: 'multiple_choice';
+      selectedIds: string[];
+    }
+  | {
+      mode: 'number_line';
+      value: number | null;
+    }
+  | {
+      mode: 'table_grid';
+      cells: Record<string, string>;
+    }
+  | {
+      mode: 'graph_plot';
+      points: Array<{ x: number; y: number }>;
+    }
+  | {
+      mode: 'matching_pairs';
+      userPairs: Array<{ leftId: string; rightId: string }>;
+    }
+  | {
+      mode: 'ordering';
+      userOrder: string[];
+    }
+  | {
+      mode: 'text_response';
+      text: string;
+    }
+  | {
+      mode: 'drawing';
+      summary?: string;
+      strokeColors?: string[];
+      strokeCount?: number;
+    };
 
 export type TutorCanvasCommand =
   | {
@@ -364,6 +430,8 @@ export type TutorCanvasCommand =
       type: 'set_drawing';
       prompt: string;
       backgroundImageUrl?: string;
+      imageId?: string;
+      imageIndex?: number;
       canvasWidth?: number;
       canvasHeight?: number;
       brushColor?: string;
@@ -381,6 +449,7 @@ export interface TutorTurn {
   text: string;
   createdAt: string;
   canvasSummary?: string;
+  canvasInteraction?: TutorCanvasInteraction | null;
 }
 
 export interface TutorRuntimeSnapshot {
@@ -404,7 +473,7 @@ export interface TutorLlmDebugTrace {
   stage: 'session_create' | 'turn';
   messages: Array<{
     role: 'system' | 'user' | 'assistant';
-    content: string;
+    content: string | OpenRouterContentPart[];
   }>;
   rawResponseText: string | null;
   rawModelContent: string | null;

@@ -13,12 +13,27 @@ import {
   updateTutorCanvasTokenZone,
   updateTutorEquationChoice,
 } from '@/lib/tutor/runtime';
+import { formatTutorDebugMessages, formatTutorDebugValue } from '@/lib/tutor/debug-log';
+import { retryAsync } from '@/lib/utils/retry';
 import type {
+  TutorCanvasEvidence,
+  TutorCanvasInteraction,
   TutorLlmDebugTrace,
   TutorRuntimeSnapshot,
   TutorSessionCreateResponse,
   TutorTurnResponse,
 } from '@/lib/types/tutor';
+
+type TutorTurnSubmitOptions = {
+  canvasEvidence?: TutorCanvasEvidence | null;
+  canvasInteraction?: TutorCanvasInteraction | null;
+};
+
+type QueuedTutorTurn = {
+  transcript: string;
+  canvasEvidence?: TutorCanvasEvidence | null;
+  canvasInteraction?: TutorCanvasInteraction | null;
+};
 import type { LessonArticleRecord } from '@/lib/types/database';
 
 function logTutorDebug(stage: 'session_create' | 'turn', debug?: TutorLlmDebugTrace) {
@@ -27,15 +42,25 @@ function logTutorDebug(stage: 'session_create' | 'turn', debug?: TutorLlmDebugTr
   }
 
   console.groupCollapsed(`[tutor:${stage}] llm trace`);
-  console.log('system prompt + history', debug.messages);
-  console.log('raw response text', debug.rawResponseText);
-  console.log('raw model content', debug.rawModelContent);
-  console.log('parsed response', debug.parsedResponse);
+  console.log(
+    'system prompt + history\n' +
+      JSON.stringify(formatTutorDebugMessages(debug.messages), null, 2)
+  );
+  console.log('raw response text', formatTutorDebugValue(debug.rawResponseText));
+  console.log('raw model content', formatTutorDebugValue(debug.rawModelContent));
+  console.log('parsed response', formatTutorDebugValue(debug.parsedResponse));
   console.log('fallback', {
     usedFallback: debug.usedFallback,
     fallbackReason: debug.fallbackReason,
   });
   console.groupEnd();
+}
+
+function isRetryableGuestLessonWriteError(error: unknown) {
+  return (
+    error instanceof Error &&
+    /compaction|write batch|already active/i.test(error.message)
+  );
 }
 
 export function useTutorSession() {
@@ -47,6 +72,13 @@ export function useTutorSession() {
   const [article, setArticle] = useState<LessonArticleRecord | null>(null);
 
   const articleGenRef = useRef(false);
+  const snapshotRef = useRef<TutorRuntimeSnapshot | null>(null);
+  const isSubmittingTurnRef = useRef(false);
+  const queuedTranscriptsRef = useRef<QueuedTutorTurn[]>([]);
+
+  useEffect(() => {
+    snapshotRef.current = snapshot;
+  }, [snapshot]);
 
   useEffect(() => {
     if (!snapshot) {
@@ -74,7 +106,15 @@ export function useTutorSession() {
               status: 'complete',
               article: payload.article,
             };
-            saveGuestLesson(lessonRecord);
+            await retryAsync(
+              async () => {
+                saveGuestLesson(lessonRecord);
+              },
+              {
+                attempts: 3,
+                shouldRetry: isRetryableGuestLessonWriteError,
+              }
+            );
           }
         })
         .catch((err) => console.error('Article generation failed:', err))
@@ -110,6 +150,7 @@ export function useTutorSession() {
 
         logTutorDebug('session_create', payload.debug);
 
+        snapshotRef.current = payload.snapshot;
         setSnapshot(payload.snapshot);
         setPhase('live');
         return payload.snapshot;
@@ -122,46 +163,129 @@ export function useTutorSession() {
     []
   );
 
+  const performTurnSubmission = useCallback(
+    async (
+      activeSnapshot: TutorRuntimeSnapshot,
+      transcript: string,
+      options?: TutorTurnSubmitOptions
+    ) => {
+      const response = await fetch('/api/tutor/turn', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          snapshot: activeSnapshot,
+          transcript,
+          canvasEvidence: options?.canvasEvidence ?? null,
+          canvasInteraction: options?.canvasInteraction ?? null,
+        }),
+      });
+
+      const payload = (await response.json()) as TutorTurnResponse & { error?: string };
+
+      if (!response.ok || !payload.snapshot) {
+        throw new Error(payload.error || 'Failed to continue the tutor session');
+      }
+
+      logTutorDebug('turn', payload.debug);
+
+      snapshotRef.current = payload.snapshot;
+      setSnapshot(payload.snapshot);
+      return true;
+    },
+    []
+  );
+
+  const flushQueuedTranscripts = useCallback(async () => {
+    if (isSubmittingTurnRef.current) {
+      return;
+    }
+
+    const activeSnapshot = snapshotRef.current;
+    const nextTurn = queuedTranscriptsRef.current.shift();
+
+    if (!activeSnapshot || !nextTurn) {
+      return;
+    }
+
+    isSubmittingTurnRef.current = true;
+    setIsSubmittingTurn(true);
+    setError(null);
+
+    try {
+      await performTurnSubmission(activeSnapshot, nextTurn.transcript, {
+        canvasEvidence: nextTurn.canvasEvidence,
+        canvasInteraction: nextTurn.canvasInteraction,
+      });
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : 'Failed to continue the tutor session'
+      );
+      throw nextError;
+    } finally {
+      isSubmittingTurnRef.current = false;
+      setIsSubmittingTurn(false);
+
+      if (queuedTranscriptsRef.current.length > 0) {
+        queueMicrotask(() => {
+          void flushQueuedTranscripts();
+        });
+      }
+    }
+  }, [performTurnSubmission]);
+
   const submitTranscript = useCallback(
-    async (transcript: string) => {
-      const activeSnapshot = snapshot;
-      if (!activeSnapshot || !transcript.trim() || isSubmittingTurn) {
+    async (transcript: string, options?: TutorTurnSubmitOptions) => {
+      const trimmedTranscript = transcript.trim();
+      const activeSnapshot = snapshotRef.current;
+
+      if (!activeSnapshot || !trimmedTranscript) {
         return false;
       }
 
+      if (isSubmittingTurnRef.current) {
+        queuedTranscriptsRef.current.push({
+          transcript: trimmedTranscript,
+          canvasEvidence: options?.canvasEvidence ?? null,
+          canvasInteraction: options?.canvasInteraction ?? null,
+        });
+
+        if (process.env.NODE_ENV !== 'production') {
+          console.info('[tutor:turn_queue] queued learner transcript while a turn was submitting', {
+            transcript: trimmedTranscript,
+            queuedCount: queuedTranscriptsRef.current.length,
+            hasCanvasEvidence: Boolean(options?.canvasEvidence?.dataUrl),
+            hasCanvasInteraction: Boolean(options?.canvasInteraction),
+          });
+        }
+
+        return true;
+      }
+
+      isSubmittingTurnRef.current = true;
       setIsSubmittingTurn(true);
       setError(null);
 
       try {
-        const response = await fetch('/api/tutor/turn', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            snapshot: activeSnapshot,
-            transcript,
-          }),
-        });
-
-        const payload = (await response.json()) as TutorTurnResponse & { error?: string };
-
-        if (!response.ok || !payload.snapshot) {
-          throw new Error(payload.error || 'Failed to continue the tutor session');
-        }
-
-        logTutorDebug('turn', payload.debug);
-
-        setSnapshot(payload.snapshot);
-        return true;
+        return await performTurnSubmission(activeSnapshot, trimmedTranscript, options);
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : 'Failed to continue the tutor session');
         throw nextError;
       } finally {
+        isSubmittingTurnRef.current = false;
         setIsSubmittingTurn(false);
+
+        if (queuedTranscriptsRef.current.length > 0) {
+          queueMicrotask(() => {
+            void flushQueuedTranscripts();
+          });
+        }
       }
     },
-    [isSubmittingTurn, snapshot]
+    [flushQueuedTranscripts, performTurnSubmission]
   );
 
   const moveToken = useCallback((tokenId: string, zoneId: string | null) => {

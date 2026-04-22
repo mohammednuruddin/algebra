@@ -38,6 +38,27 @@ function previewJsonForLogs(content: string, limit = 1200) {
   return content.length > limit ? `${content.slice(0, limit)}...` : content;
 }
 
+function supportsVisionDescription(imageUrl: string) {
+  return !/\.svg(\?|$)/i.test(imageUrl);
+}
+
+function buildFallbackDescription(candidate: SerperImageResult, topic: string): ImageDescription {
+  const title = candidate.title || `${topic} diagram`;
+
+  return {
+    summary: `${title} relevant to ${topic}.`,
+    imageKind: 'diagram',
+    showsProcess: /process|cycle|flow|system|diagram/i.test(title),
+    keyObjects: [topic],
+    keyRegions: [],
+    teachingValueScore: 6,
+    childFriendlinessScore: 6,
+    clutterScore: 3,
+    suggestedUse: 'Use as a visual reference while explaining the main parts.',
+    tutorGuidance: ['Point out the main labeled parts on the image.'],
+  };
+}
+
 async function describeImage(imageUrl: string, topic: string) {
   const model = process.env.OPENROUTER_IMAGE_MODEL || 'google/gemini-2.5-flash-lite';
   const prompt =
@@ -162,6 +183,14 @@ export async function searchLessonImages(input: {
   const described: Array<{ candidate: SerperImageResult; description: ImageDescription }> = [];
 
   for (const candidate of candidates) {
+    if (!supportsVisionDescription(candidate.imageUrl!)) {
+      described.push({
+        candidate,
+        description: buildFallbackDescription(candidate, topic),
+      });
+      continue;
+    }
+
     try {
       const description = await describeImage(candidate.imageUrl!, topic);
       described.push({ candidate, description });

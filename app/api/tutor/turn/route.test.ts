@@ -188,7 +188,26 @@ describe('POST /api/tutor/turn', () => {
     expect(data.snapshot.speech).toBe('Let us start with one-step linear equations.');
   });
 
-  it('ignores filler-only intake fragments instead of sending them to the model', async () => {
+  it('forwards short or filler-like intake speech instead of swallowing it in the route', async () => {
+    mockGenerateTutorIntakeTurn.mockResolvedValue({
+      response: {
+        speech: 'Tell me the topic you want.',
+        awaitMode: 'voice',
+        readyToStartLesson: false,
+        topic: null,
+        learnerLevel: null,
+      },
+      debug: {
+        stage: 'turn',
+        messages: [],
+        rawResponseText: null,
+        rawModelContent: null,
+        parsedResponse: null,
+        usedFallback: false,
+        fallbackReason: null,
+      },
+    });
+
     const snapshot = buildSnapshot({
       sessionId: 'tutor_2',
       prompt: '',
@@ -225,8 +244,244 @@ describe('POST /api/tutor/turn', () => {
     const data = (await response.json()) as { snapshot: TutorRuntimeSnapshot };
 
     expect(response.status).toBe(200);
-    expect(mockGenerateTutorIntakeTurn).not.toHaveBeenCalled();
-    expect(data.snapshot.turns).toEqual(snapshot.turns);
-    expect(data.snapshot.speech).toBe(snapshot.speech);
+    expect(mockGenerateTutorIntakeTurn).toHaveBeenCalledTimes(1);
+    expect(data.snapshot.turns).toHaveLength(3);
+    expect(data.snapshot.speech).toBe('Tell me the topic you want.');
+  });
+
+  it('marks the lesson completed when the model ends the live session', async () => {
+    mockGenerateTutorTurn.mockResolvedValue({
+      response: {
+        speech: 'Nice work. We can stop here for today.',
+        awaitMode: 'voice',
+        commands: [{ type: 'complete_session' }],
+        sessionComplete: true,
+        status: 'completed',
+      },
+      debug: {
+        stage: 'turn',
+        messages: [],
+        rawResponseText: null,
+        rawModelContent: null,
+        parsedResponse: null,
+        usedFallback: false,
+        fallbackReason: null,
+      },
+    });
+
+    const request = new NextRequest('http://localhost:3000/api/tutor/turn', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: buildSnapshot({
+          sessionId: 'tutor_3',
+          prompt: 'Python programming',
+          lessonTopic: 'Python programming',
+          learnerLevel: 'beginner',
+          lessonOutline: ['Use one concrete example.'],
+          speech: 'Want one more example?',
+          awaitMode: 'voice',
+          canvas: emptyCanvas,
+          turns: [
+            {
+              actor: 'user',
+              text: 'I want to stop now.',
+              createdAt: '2026-04-22T00:00:00.000Z',
+            },
+          ],
+          intake: null,
+        }),
+        transcript: 'Let us end the lesson.',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const response = await POST(request);
+    const data = (await response.json()) as { snapshot: TutorRuntimeSnapshot };
+
+    expect(response.status).toBe(200);
+    expect(mockGenerateTutorTurn).toHaveBeenCalledTimes(1);
+    expect(data.snapshot.status).toBe('completed');
+    expect(data.snapshot.speech).toBe('Nice work. We can stop here for today.');
+  });
+
+  it('forwards canvas evidence and logs the learner transcript on live turns', async () => {
+    mockGenerateTutorTurn.mockResolvedValue({
+      response: {
+        speech: 'Thanks, I can see your markings.',
+        awaitMode: 'voice',
+        commands: [],
+        sessionComplete: false,
+        status: 'active',
+      },
+      debug: {
+        stage: 'turn',
+        messages: [],
+        rawResponseText: null,
+        rawModelContent: null,
+        parsedResponse: null,
+        usedFallback: false,
+        fallbackReason: null,
+      },
+    });
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const request = new NextRequest('http://localhost:3000/api/tutor/turn', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: buildSnapshot({
+          sessionId: 'tutor_4',
+          prompt: 'pollination',
+          lessonTopic: 'pollination',
+          learnerLevel: 'beginner',
+          speech: 'Point to the anther.',
+          canvas: {
+            ...emptyCanvas,
+            mode: 'drawing',
+            drawing: {
+              prompt: 'Point to the anther.',
+              backgroundImageUrl: 'https://example.com/flower.png',
+              canvasWidth: 800,
+              canvasHeight: 600,
+              brushColor: '#FF3B30',
+              brushSize: 4,
+              submitted: false,
+            },
+          },
+          intake: null,
+        }),
+        transcript: 'I marked it here.',
+        canvasEvidence: {
+          mode: 'drawing',
+          summary: 'Learner submitted a marked flower diagram.',
+          dataUrl: 'data:image/png;base64,marked',
+          overlayDataUrl: 'data:image/png;base64,overlay',
+          strokeColors: ['#FF3B30'],
+          strokeCount: 1,
+        },
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mockGenerateTutorTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transcript: 'I marked it here.',
+        canvasTaskPrompt: 'Point to the anther.',
+        canvasReferenceImageUrl: 'https://example.com/flower.png',
+        canvasBrushColor: '#FF3B30',
+        canvasEvidence: {
+          mode: 'drawing',
+          summary: 'Learner submitted a marked flower diagram.',
+          dataUrl: 'data:image/png;base64,marked',
+          overlayDataUrl: 'data:image/png;base64,overlay',
+          strokeColors: ['#FF3B30'],
+          strokeCount: 1,
+        },
+      })
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      '[tutor:turn_request] learner input',
+      expect.objectContaining({
+        transcript: 'I marked it here.',
+        canvasInteraction: expect.objectContaining({
+          mode: 'drawing',
+        }),
+        hasCanvasEvidence: true,
+        canvasEvidenceMode: 'drawing',
+      })
+    );
+  });
+
+  it('builds structured tutor context from a submitted text response instead of the stale empty canvas state', async () => {
+    mockSummarizeTutorCanvas.mockImplementation((canvas: TutorCanvasState) =>
+      canvas.textResponse
+        ? `Text response: ${canvas.textResponse.prompt}. Answer: ${canvas.textResponse.userText || '(empty)'}. Submitted: ${canvas.textResponse.submitted}.`
+        : 'Empty canvas.'
+    );
+    mockGenerateTutorTurn.mockResolvedValue({
+      response: {
+        speech: 'Pollen moves down the style toward the ovary.',
+        awaitMode: 'voice_or_canvas',
+        commands: [],
+        sessionComplete: false,
+        status: 'active',
+      },
+      debug: {
+        stage: 'turn',
+        messages: [],
+        rawResponseText: null,
+        rawModelContent: null,
+        parsedResponse: null,
+        usedFallback: false,
+        fallbackReason: null,
+      },
+    });
+
+    const request = new NextRequest('http://localhost:3000/api/tutor/turn', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: buildSnapshot({
+          sessionId: 'tutor_5',
+          prompt: 'pollination',
+          lessonTopic: 'pollination',
+          learnerLevel: 'beginner',
+          speech: 'Type what happens to the pollen as it moves down the style.',
+          canvas: {
+            ...emptyCanvas,
+            mode: 'text_response',
+            textResponse: {
+              prompt: 'What happens to the pollen as it moves down the style toward the ovary?',
+              placeholder: 'Type your answer',
+              userText: '',
+              maxLength: 200,
+              submitted: false,
+            },
+          },
+          turns: [
+            {
+              actor: 'tutor',
+              text: 'Type what happens to the pollen as it moves down the style.',
+              createdAt: '2026-04-22T10:00:00.000Z',
+            },
+          ],
+          intake: null,
+        }),
+        transcript: '[Canvas interaction: text_response] {"text":"i dont know"}',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const response = await POST(request);
+    const data = (await response.json()) as { snapshot: TutorRuntimeSnapshot };
+
+    expect(response.status).toBe(200);
+    expect(mockGenerateTutorTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canvasSummary: expect.stringContaining('Answer: i dont know. Submitted: true.'),
+        canvasStateContext: expect.stringContaining('"learnerText": "i dont know"'),
+        latestLearnerTurnContext: expect.stringContaining('"mode": "text_response"'),
+        recentTurnFrames: expect.stringContaining('"actor": "tutor"'),
+      })
+    );
+    expect(data.snapshot.turns.at(-2)).toEqual(
+      expect.objectContaining({
+        actor: 'user',
+        text: '[Canvas interaction: text_response] {"text":"i dont know"}',
+        canvasSummary: expect.stringContaining('Answer: i dont know. Submitted: true.'),
+        canvasInteraction: {
+          mode: 'text_response',
+          text: 'i dont know',
+        },
+      })
+    );
   });
 });

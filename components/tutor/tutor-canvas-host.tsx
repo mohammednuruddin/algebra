@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import type { TutorCanvasState } from '@/lib/types/tutor';
+import type { TutorCanvasState, TutorCodeExecutionResult } from '@/lib/types/tutor';
+import { DrawingCanvas } from '@/components/lesson/drawing-canvas';
+import { TutorCodeEditor } from '@/components/tutor/tutor-code-editor';
+import { runPythonCode, type PythonRunResult } from '@/lib/code/python-runner';
+import { resolveLessonImageUrl } from '@/lib/media/media-url';
 
 interface TutorCanvasHostProps {
   canvas: TutorCanvasState;
@@ -9,26 +13,19 @@ interface TutorCanvasHostProps {
   onMoveToken: (tokenId: string, zoneId: string | null) => void;
   onChooseEquationAnswer: (choiceId: string) => void;
   onFillBlankSubmit?: (answers: Record<string, string>) => void;
-  onCodeSubmit?: (code: string) => void;
+  onCodeSubmit?: (code: string, result: TutorCodeExecutionResult) => void;
   onCanvasSubmit?: (mode: string, data: unknown) => void;
 }
 
 /* ── Shared section wrapper ─────────────────────────────────────────── */
 
 function CanvasSection({
-  headline,
   children,
 }: {
-  headline: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex min-h-[40dvh] flex-col border border-zinc-200 bg-white p-8 md:p-14 shadow-lg animate-in fade-in duration-700">
-      <div className="mb-6">
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
-          {headline}
-        </p>
-      </div>
+    <section className="flex min-h-[40dvh] w-full min-w-0 flex-col overflow-hidden border border-zinc-200 bg-white p-8 md:p-14 shadow-lg animate-in fade-in duration-700">
       {children}
     </section>
   );
@@ -139,7 +136,7 @@ function FillBlankMode({
   const allFilled = fillBlank.slots.every((s) => (answers[s.id] || '').trim().length > 0);
 
   return (
-    <CanvasSection headline={canvas.headline}>
+    <CanvasSection>
       <p className="text-xl md:text-2xl font-light text-zinc-900 leading-relaxed mb-8">{fillBlank.prompt}</p>
       <div className="flex-1 flex flex-col justify-center">
         <div className="text-lg md:text-xl leading-relaxed text-zinc-800 flex flex-wrap items-baseline gap-1">
@@ -177,6 +174,47 @@ function FillBlankMode({
 
 /* ── Code editor ────────────────────────────────────────────────────── */
 
+function isInstructionOnlyCommentBlock(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return false;
+  }
+
+  const lines = trimmed
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length || !lines.every((line) => /^(#|\/\/|--|;)/.test(line))) {
+    return false;
+  }
+
+  const commentText = lines
+    .map((line) => line.replace(/^(#|\/\/|--|;)\s*/, ''))
+    .join(' ')
+    .toLowerCase();
+
+  return /(type|write|enter|press|start|put|below|here|your code|your math)/.test(commentText);
+}
+
+function sanitizeCodeBlockSeed(value: string) {
+  return isInstructionOnlyCommentBlock(value) ? '' : value;
+}
+
+function buildCodeTaskKey(codeBlock: NonNullable<TutorCanvasState['codeBlock']>) {
+  return JSON.stringify({
+    prompt: codeBlock.prompt,
+    language: codeBlock.language,
+    starterCode: sanitizeCodeBlockSeed(codeBlock.starterCode),
+    expectedOutput: codeBlock.expectedOutput ?? null,
+  });
+}
+
+function supportsExecutableLanguage(language: string) {
+  return language.trim().toLowerCase() === 'python';
+}
+
 function CodeBlockMode({
   canvas,
   disabled,
@@ -184,53 +222,102 @@ function CodeBlockMode({
 }: {
   canvas: TutorCanvasState;
   disabled: boolean;
-  onSubmit?: (code: string) => void;
+  onSubmit?: (code: string, result: TutorCodeExecutionResult) => void;
 }) {
-  const codeBlock = canvas.codeBlock;
-  const [code, setCode] = useState(codeBlock?.starterCode || '');
-  const [submitted, setSubmitted] = useState(false);
+  const codeBlock = canvas.codeBlock as NonNullable<TutorCanvasState['codeBlock']>;
 
-  const handleSubmit = useCallback(() => {
-    setSubmitted(true);
-    onSubmit?.(code);
-  }, [code, onSubmit]);
+  const initialCode = sanitizeCodeBlockSeed(codeBlock.userCode || codeBlock.starterCode || '');
+  const [code, setCode] = useState(initialCode);
+  const [submitted, setSubmitted] = useState(Boolean(codeBlock?.submitted));
+  const [runResult, setRunResult] = useState<PythonRunResult | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
 
-  if (!codeBlock) return null;
+  const handleSubmit = useCallback(async () => {
+    setIsRunning(true);
+
+    try {
+      let result: PythonRunResult;
+
+      if (supportsExecutableLanguage(codeBlock.language)) {
+        result = await runPythonCode(code);
+      } else {
+        result = {
+          status: 'error',
+          stdout: '',
+          stderr: `Runtime output is only available for Python right now. Received ${codeBlock.language}.`,
+        };
+      }
+
+      setSubmitted(true);
+      setRunResult(result);
+      onSubmit?.(code, result);
+    } finally {
+      setIsRunning(false);
+    }
+  }, [code, codeBlock.language, onSubmit]);
 
   return (
-    <CanvasSection headline={canvas.headline}>
+    <CanvasSection>
       <p className="text-xl md:text-2xl font-light text-zinc-900 leading-relaxed">{codeBlock.prompt}</p>
       <p className="mt-2 text-xs text-zinc-400 font-mono uppercase tracking-wider">{codeBlock.language}</p>
-      <div className="flex-1 flex flex-col mt-4">
-        <div className="flex-1 rounded-lg border border-zinc-200 bg-zinc-950 overflow-hidden">
-          <textarea
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            disabled={disabled || (submitted && codeBlock.submitted)}
-            spellCheck={false}
-            className="h-full w-full resize-none bg-transparent p-6 font-mono text-sm text-emerald-400 outline-none placeholder-zinc-600"
-            placeholder={`Write your ${codeBlock.language} code here...`}
-            style={{ tabSize: 4, minHeight: '200px' }}
-            onKeyDown={(e) => {
-              if (e.key === 'Tab') {
-                e.preventDefault();
-                const target = e.currentTarget;
-                const start = target.selectionStart;
-                const end = target.selectionEnd;
-                const newValue = code.substring(0, start) + '    ' + code.substring(end);
-                setCode(newValue);
-                requestAnimationFrame(() => { target.selectionStart = target.selectionEnd = start + 4; });
-              }
-            }}
-          />
-        </div>
-        <div className="mt-4 flex items-center justify-between">
-          {codeBlock.expectedOutput && (
-            <p className="text-xs text-zinc-500">
-              Expected: <code className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-zinc-700">{codeBlock.expectedOutput}</code>
+      <div className="mt-4 flex min-w-0 flex-1 flex-col gap-4">
+        <TutorCodeEditor
+          language={codeBlock.language}
+          value={code}
+          disabled={disabled || isRunning}
+          onChange={setCode}
+        />
+
+        {runResult ? (
+          <div className="grid min-w-0 gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 md:grid-cols-2 md:items-start">
+            {runResult.stdout ? (
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                  Output
+                </p>
+                <pre className="mt-3 overflow-x-auto rounded-lg bg-zinc-950 p-4 font-mono text-sm leading-6 text-emerald-300">
+                  {runResult.stdout}
+                </pre>
+              </div>
+            ) : null}
+            {runResult.stderr ? (
+              <div className="min-w-0 md:max-w-xl">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-rose-600">
+                  Error
+                </p>
+                <pre className="mt-3 overflow-x-auto rounded-lg border border-rose-200 bg-rose-50 p-4 font-mono text-sm leading-6 text-rose-700">
+                  {runResult.stderr}
+                </pre>
+              </div>
+            ) : null}
+            {codeBlock.expectedOutput ? (
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+                  Expected output
+                </p>
+                <code className="mt-3 block overflow-x-auto whitespace-pre-wrap rounded-lg bg-white px-3 py-2 font-mono text-sm text-zinc-700 shadow-sm">
+                  {codeBlock.expectedOutput}
+                </code>
+              </div>
+            ) : null}
+          </div>
+        ) : codeBlock.expectedOutput ? (
+          <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-4 py-3">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">
+              Expected output
             </p>
-          )}
-          <SubmitButton onClick={handleSubmit} disabled={disabled || !code.trim()} label={submitted ? 'Resubmit' : 'Submit Code'} />
+            <code className="mt-2 block overflow-x-auto whitespace-pre-wrap font-mono text-sm text-zinc-700">
+              {codeBlock.expectedOutput}
+            </code>
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-end">
+          <SubmitButton
+            onClick={handleSubmit}
+            disabled={disabled || isRunning || !code.trim()}
+            label={isRunning ? 'Running...' : submitted ? 'Run again' : 'Run code'}
+          />
         </div>
       </div>
     </CanvasSection>
@@ -268,7 +355,7 @@ function MultipleChoiceMode({
   };
 
   return (
-    <CanvasSection headline={canvas.headline}>
+    <CanvasSection>
       <p className="text-xl md:text-2xl font-light text-zinc-900 leading-relaxed mb-8">{mc.prompt}</p>
       <div className="flex-1 flex flex-col justify-center">
         <div className="grid gap-3 max-w-2xl mx-auto w-full">
@@ -346,7 +433,7 @@ function NumberLineMode({
   const isWrong = submitted && nl.correctValue !== undefined && !isCorrect;
 
   return (
-    <CanvasSection headline={canvas.headline}>
+    <CanvasSection>
       <p className="text-xl md:text-2xl font-light text-zinc-900 leading-relaxed mb-12">{nl.prompt}</p>
       <div className="flex-1 flex flex-col justify-center px-4">
         <div ref={trackRef} className="relative h-16 cursor-pointer" onClick={handleClick}>
@@ -409,7 +496,7 @@ function TableGridMode({
   };
 
   return (
-    <CanvasSection headline={canvas.headline}>
+    <CanvasSection>
       <p className="text-xl md:text-2xl font-light text-zinc-900 leading-relaxed mb-8">{tg.prompt}</p>
       <div className="flex-1 flex flex-col justify-center overflow-x-auto">
         <table className="w-full border-collapse max-w-3xl mx-auto">
@@ -502,7 +589,7 @@ function GraphPlotMode({
   };
 
   return (
-    <CanvasSection headline={canvas.headline}>
+    <CanvasSection>
       <p className="text-xl md:text-2xl font-light text-zinc-900 leading-relaxed mb-6">{gp.prompt}</p>
       <div className="flex-1 flex flex-col items-center justify-center">
         <svg viewBox={`0 0 ${width} ${height}`} className="w-full max-w-md border border-zinc-200 bg-white rounded" onClick={handleClick}>
@@ -582,7 +669,7 @@ function MatchingPairsMode({
   const pairColors = ['#2563eb', '#0f766e', '#c2410c', '#7c3aed', '#be123c', '#ca8a04'];
 
   return (
-    <CanvasSection headline={canvas.headline}>
+    <CanvasSection>
       <p className="text-xl md:text-2xl font-light text-zinc-900 leading-relaxed mb-8">{mp.prompt}</p>
       <div className="flex-1 flex justify-center gap-12">
         <div className="flex flex-col gap-3">
@@ -675,7 +762,7 @@ function OrderingMode({
   };
 
   return (
-    <CanvasSection headline={canvas.headline}>
+    <CanvasSection>
       <p className="text-xl md:text-2xl font-light text-zinc-900 leading-relaxed mb-8">{ord.prompt}</p>
       <div className="flex-1 flex flex-col justify-center max-w-lg mx-auto w-full">
         {order.map((id, idx) => {
@@ -734,7 +821,7 @@ function TextResponseMode({
   };
 
   return (
-    <CanvasSection headline={canvas.headline}>
+    <CanvasSection>
       <p className="text-xl md:text-2xl font-light text-zinc-900 leading-relaxed mb-8">{tr.prompt}</p>
       <div className="flex-1 flex flex-col justify-center max-w-2xl mx-auto w-full">
         <textarea
@@ -770,98 +857,99 @@ function DrawingMode({
   onSubmit?: (mode: string, data: unknown) => void;
 }) {
   const dw = canvas.drawing;
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawingRef = useRef(false);
-  const [submitted, setSubmitted] = useState(false);
-
-  useEffect(() => {
-    const c = canvasRef.current;
-    if (!c || !dw) return;
-    const ctx = c.getContext('2d');
-    if (!ctx) return;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, c.width, c.height);
-    if (dw.backgroundImageUrl) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => ctx.drawImage(img, 0, 0, c.width, c.height);
-      img.src = dw.backgroundImageUrl;
-    }
-  }, [dw]);
-
+  const sceneKey = `${dw?.sceneRevision || 0}::${dw?.prompt || ''}::${dw?.backgroundImageUrl || ''}`;
   if (!dw) return null;
 
-  const getPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return {
-      x: (e.clientX - rect.left) * (dw.canvasWidth / rect.width),
-      y: (e.clientY - rect.top) * (dw.canvasHeight / rect.height),
+  return (
+    <DrawingScene
+      key={sceneKey}
+      drawing={dw}
+      disabled={disabled}
+      onSubmit={onSubmit}
+    />
+  );
+}
+
+function DrawingScene({
+  drawing,
+  disabled,
+  onSubmit,
+}: {
+  drawing: NonNullable<TutorCanvasState['drawing']>;
+  disabled: boolean;
+  onSubmit?: (mode: string, data: unknown) => void;
+}) {
+  const [submitted, setSubmitted] = useState(false);
+  const [backgroundImage, setBackgroundImage] = useState<HTMLImageElement | null>(null);
+  const [backgroundLoadError, setBackgroundLoadError] = useState(false);
+  const resolvedBackgroundUrl = resolveLessonImageUrl(drawing.backgroundImageUrl);
+
+  useEffect(() => {
+    if (!resolvedBackgroundUrl) {
+      return;
+    }
+
+    let active = true;
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (!active) return;
+      setBackgroundImage(img);
+      setBackgroundLoadError(false);
     };
-  };
+    img.onerror = () => {
+      if (!active) return;
+      setBackgroundImage(null);
+      setBackgroundLoadError(true);
+    };
+    img.src = resolvedBackgroundUrl;
 
-  const startDraw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (disabled || submitted) return;
-    drawingRef.current = true;
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
-    const pos = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
-    ctx.strokeStyle = dw.brushColor;
-    ctx.lineWidth = dw.brushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-  };
+    return () => {
+      active = false;
+    };
+  }, [resolvedBackgroundUrl]);
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!drawingRef.current) return;
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
-    const pos = getPos(e);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.stroke();
-  };
-
-  const endDraw = () => { drawingRef.current = false; };
-
-  const clearCanvas = () => {
-    const c = canvasRef.current;
-    if (!c) return;
-    const ctx = c.getContext('2d');
-    if (!ctx) return;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, c.width, c.height);
-  };
-
-  const handleSubmit = () => {
+  const handleSnapshot = (
+    dataUrl: string,
+    metadata?: {
+      overlayDataUrl: string;
+      strokeColors: string[];
+      strokeCount: number;
+      canvasWidth: number;
+      canvasHeight: number;
+    }
+  ) => {
     setSubmitted(true);
-    const dataUrl = canvasRef.current?.toDataURL('image/png');
-    onSubmit?.('drawing', { dataUrl });
+    onSubmit?.('drawing', {
+      dataUrl,
+      overlayDataUrl: metadata?.overlayDataUrl,
+      strokeColors: metadata?.strokeColors,
+      strokeCount: metadata?.strokeCount,
+      canvasWidth: metadata?.canvasWidth ?? drawing.canvasWidth,
+      canvasHeight: metadata?.canvasHeight ?? drawing.canvasHeight,
+    });
   };
 
   return (
-    <CanvasSection headline={canvas.headline}>
-      <p className="text-xl md:text-2xl font-light text-zinc-900 leading-relaxed mb-6">{dw.prompt}</p>
-      <div className="flex-1 flex flex-col items-center justify-center">
-        <canvas
-          ref={canvasRef}
-          width={dw.canvasWidth}
-          height={dw.canvasHeight}
-          onMouseDown={startDraw}
-          onMouseMove={draw}
-          onMouseUp={endDraw}
-          onMouseLeave={endDraw}
-          className="border border-zinc-200 rounded-lg cursor-crosshair max-w-full"
-          style={{ maxHeight: '400px', aspectRatio: `${dw.canvasWidth}/${dw.canvasHeight}` }}
+    <CanvasSection>
+      <div className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+        <p className="text-sm font-medium text-zinc-700">
+          Use the drawing tools, then press Submit Markup when you are done.
+        </p>
+        {resolvedBackgroundUrl && backgroundLoadError ? (
+          <span className="text-xs font-semibold uppercase tracking-[0.12em] text-rose-600">
+            Image failed to load
+          </span>
+        ) : null}
+      </div>
+      <div className="flex-1">
+        <DrawingCanvas
+          width={drawing.canvasWidth}
+          height={drawing.canvasHeight}
+          backgroundImage={resolvedBackgroundUrl ? backgroundImage : null}
+          onSnapshot={handleSnapshot}
+          disabled={disabled || submitted}
         />
-        {!submitted && (
-          <div className="mt-6 flex gap-3">
-            <button type="button" onClick={clearCanvas} disabled={disabled} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-50">
-              Clear
-            </button>
-            <SubmitButton onClick={handleSubmit} disabled={disabled} label="Submit Drawing" />
-          </div>
-        )}
       </div>
     </CanvasSection>
   );
@@ -883,7 +971,14 @@ export function TutorCanvasHost({
   }
 
   if (canvas.mode === 'code_block' && canvas.codeBlock) {
-    return <CodeBlockMode canvas={canvas} disabled={disabled} onSubmit={onCodeSubmit} />;
+    return (
+      <CodeBlockMode
+        key={buildCodeTaskKey(canvas.codeBlock)}
+        canvas={canvas}
+        disabled={disabled}
+        onSubmit={onCodeSubmit}
+      />
+    );
   }
 
   if (canvas.mode === 'multiple_choice' && canvas.multipleChoice) {
@@ -922,8 +1017,7 @@ export function TutorCanvasHost({
     return (
       <section className="flex min-h-[60dvh] flex-col border border-zinc-200 bg-white p-8 md:p-14 shadow-lg animate-in fade-in duration-700">
         <div className="mb-12">
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">{canvas.headline}</p>
-          <p className="mt-4 text-2xl md:text-3xl font-light text-zinc-900 leading-relaxed">{canvas.equation.prompt}</p>
+          <p className="text-2xl md:text-3xl font-light text-zinc-900 leading-relaxed">{canvas.equation.prompt}</p>
         </div>
         <div className="flex flex-1 flex-col justify-center items-center">
           <p className="text-5xl md:text-7xl font-light tracking-tight text-zinc-900 mb-16">{canvas.equation.expression}</p>
@@ -955,12 +1049,6 @@ export function TutorCanvasHost({
 
   return (
     <section className="flex min-h-[60dvh] w-full flex-col p-8 md:p-14 bg-white border border-zinc-200 shadow-lg animate-in fade-in duration-700">
-      <div className="mb-10 flex items-start justify-between gap-6">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">{canvas.headline}</p>
-          <p className="mt-4 max-w-2xl text-2xl md:text-3xl font-light text-zinc-900 leading-relaxed">{canvas.instruction}</p>
-        </div>
-      </div>
       <div className="grid flex-1 gap-6 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
         <ZoneCard label="Bench" hint="Drag items to the zones." onDropToken={(tokenId) => onMoveToken(tokenId, null)}>
           {looseTokens.map((token) => (

@@ -1,6 +1,8 @@
 'use client';
 
+import { useMemo, useState } from 'react';
 import type { TutorRuntimeSnapshot } from '@/lib/types/tutor';
+import type { TutorCodeExecutionResult } from '@/lib/types/tutor';
 import type { LessonArticleRecord } from '@/lib/types/database';
 
 import { TutorCanvasHost } from '@/components/tutor/tutor-canvas-host';
@@ -24,7 +26,7 @@ interface TutorShellProps {
   onMoveToken: (tokenId: string, zoneId: string | null) => void;
   onChooseEquationAnswer: (choiceId: string) => void;
   onFillBlankSubmit?: (answers: Record<string, string>) => void;
-  onCodeSubmit?: (code: string) => void;
+  onCodeSubmit?: (code: string, result: TutorCodeExecutionResult) => void;
   onCanvasSubmit?: (mode: string, data: unknown) => void;
   isGeneratingArticle?: boolean;
   article?: LessonArticleRecord | null;
@@ -32,6 +34,28 @@ interface TutorShellProps {
   onTeacherSpeakingChange: (value: boolean) => void;
   onTeacherAudioPendingChange?: (value: boolean) => void;
   onTeacherInterrupt?: () => void;
+}
+
+function hasVisibleCanvasScene(snapshot: TutorRuntimeSnapshot) {
+  const canvas = snapshot.canvas;
+
+  if (
+    canvas.fillBlank ||
+    canvas.codeBlock ||
+    canvas.multipleChoice ||
+    canvas.numberLine ||
+    canvas.tableGrid ||
+    canvas.graphPlot ||
+    canvas.matchingPairs ||
+    canvas.ordering ||
+    canvas.textResponse ||
+    canvas.drawing ||
+    canvas.equation
+  ) {
+    return true;
+  }
+
+  return canvas.tokens.length > 0 || canvas.zones.length > 0;
 }
 
 export function TutorShell({
@@ -58,9 +82,30 @@ export function TutorShell({
   onTeacherAudioPendingChange,
   onTeacherInterrupt,
 }: TutorShellProps) {
+  const [voiceUnlockRequested, setVoiceUnlockRequested] = useState(false);
+  const [teacherSpeechSuspended, setTeacherSpeechSuspended] = useState(false);
   const activeImage = (snapshot.mediaAssets || []).find((asset) => asset.id === snapshot.activeImageId) || null;
   const showCanvas = snapshot.intake?.status !== 'active';
-  const teacherBusy = teacherSpeaking || teacherAudioPending;
+  const showCanvasScene = showCanvas && hasVisibleCanvasScene(snapshot);
+  const canvasOwnsStageImage =
+    snapshot.canvas.mode === 'drawing' &&
+    Boolean(snapshot.canvas.drawing?.backgroundImageUrl);
+  const showStandaloneImageStage = Boolean(activeImage) && !canvasOwnsStageImage;
+  const showStageVisual = showStandaloneImageStage || showCanvasScene;
+  const needsVoiceUnlock = voiceEnabled || speechToTextEnabled;
+  const voiceControlsArmed = !needsVoiceUnlock || voiceUnlockRequested;
+  const unlockLabel = useMemo(() => {
+    if (voiceEnabled && speechToTextEnabled) {
+      return 'Enable voice and mic';
+    }
+    if (voiceEnabled) {
+      return 'Enable tutor voice';
+    }
+    if (speechToTextEnabled) {
+      return 'Enable microphone';
+    }
+    return 'Enable voice';
+  }, [speechToTextEnabled, voiceEnabled]);
 
   return (
     <div className="flex h-[100dvh] w-full overflow-hidden bg-[#FAFAFA] text-zinc-900 font-sans selection:bg-zinc-200 selection:text-zinc-900">
@@ -71,23 +116,30 @@ export function TutorShell({
       />
       {voiceEnabled ? (
         <TutorVoicePlayer
-          enabled={voiceEnabled}
+          enabled={voiceEnabled && voiceControlsArmed}
           text={snapshot.speech}
           provider={ttsProvider}
           modelId={ttsModelId}
           voiceId={teacherVoiceId}
           playToken={snapshot.speechRevision}
+          paused={teacherSpeechSuspended}
           stopSignal={teacherStopSignal}
-          onRequestStart={() => onTeacherAudioPendingChange?.(true)}
+          onRequestStart={() => {
+            setTeacherSpeechSuspended(false);
+            onTeacherAudioPendingChange?.(true);
+          }}
           onStart={() => {
+            setTeacherSpeechSuspended(false);
             onTeacherAudioPendingChange?.(false);
             onTeacherSpeakingChange(true);
           }}
           onComplete={() => {
+            setTeacherSpeechSuspended(false);
             onTeacherAudioPendingChange?.(false);
             onTeacherSpeakingChange(false);
           }}
           onError={() => {
+            setTeacherSpeechSuspended(false);
             onTeacherAudioPendingChange?.(false);
             onTeacherSpeakingChange(false);
           }}
@@ -115,7 +167,7 @@ export function TutorShell({
           />
 
           {activeImage ? (
-            <section className="mt-16 animate-in fade-in duration-700">
+            <section className="mt-16 animate-in fade-in duration-700 md:hidden">
               <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-4">Visual Context</p>
               <div className="border border-zinc-200 bg-[#FAFAFA] p-3 shadow-sm">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -131,36 +183,82 @@ export function TutorShell({
         </main>
 
         <footer className="px-8 py-6 border-t border-zinc-100 bg-white shrink-0">
-          <TutorVoiceDock
-            disabled={snapshot.status === 'completed' || isSubmittingTurn}
-            runtimeStatus={runtimeStatus}
-            speechToTextEnabled={speechToTextEnabled}
-            teacherSpeaking={teacherBusy}
-            onSpeechStart={() => {
-              onTeacherInterrupt?.();
-              onTeacherAudioPendingChange?.(false);
-              onTeacherSpeakingChange(false);
-            }}
-            onTranscript={onTranscript}
-          />
+          {needsVoiceUnlock && !voiceControlsArmed ? (
+            <button
+              type="button"
+              onClick={() => setVoiceUnlockRequested(true)}
+              className="flex w-full items-center justify-center rounded-full bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800"
+            >
+              {unlockLabel}
+            </button>
+          ) : (
+            <TutorVoiceDock
+              disabled={snapshot.status === 'completed' || isSubmittingTurn}
+              maintainConnection={snapshot.status !== 'completed'}
+              runtimeStatus={runtimeStatus}
+              speechToTextEnabled={speechToTextEnabled && voiceControlsArmed}
+              teacherSpeaking={teacherSpeaking}
+              teacherAudioPending={teacherAudioPending}
+              teacherSpeechText={snapshot.speech}
+              onBargeInStart={() => {
+                setTeacherSpeechSuspended(true);
+              }}
+              onBargeInCancel={() => {
+                setTeacherSpeechSuspended(false);
+              }}
+              onBargeInCommit={() => {
+                setTeacherSpeechSuspended(false);
+                onTeacherInterrupt?.();
+                onTeacherAudioPendingChange?.(false);
+                onTeacherSpeakingChange(false);
+              }}
+              onTranscript={onTranscript}
+            />
+          )}
         </footer>
       </div>
 
       {/* RIGHT PANE - INTERACTION */}
-      <div className="hidden md:flex flex-1 h-full overflow-y-auto items-center justify-center relative bg-white">
+      <div className="hidden md:flex min-w-0 flex-1 h-full overflow-x-hidden overflow-y-auto items-center justify-center relative bg-white">
          <div className="absolute inset-0 opacity-[0.4]" style={{ backgroundImage: "radial-gradient(#e5e7eb 1px, transparent 1px)", backgroundSize: "24px 24px" }}></div>
 
-         {showCanvas ? (
-           <div className="w-full h-full max-w-5xl relative z-10 flex flex-col justify-center p-12">
-              <TutorCanvasHost
-                canvas={snapshot.canvas}
-                disabled={snapshot.status === 'completed'}
-                onMoveToken={onMoveToken}
-                onChooseEquationAnswer={onChooseEquationAnswer}
-                onFillBlankSubmit={onFillBlankSubmit}
-                onCodeSubmit={onCodeSubmit}
-                onCanvasSubmit={onCanvasSubmit}
-              />
+         {showStageVisual ? (
+           <div className="relative z-10 flex h-full w-full min-w-0 max-w-5xl flex-col justify-center gap-8 p-6 md:p-8 xl:p-12">
+              {showStandaloneImageStage && activeImage ? (
+                <section
+                  data-testid="active-image-stage"
+                  className="overflow-hidden border border-zinc-200 bg-white shadow-lg animate-in fade-in duration-700"
+                >
+                  <div className="border-b border-zinc-100 px-6 py-4">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
+                      Visual Context
+                    </p>
+                  </div>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={activeImage.url}
+                    alt={activeImage.altText}
+                    className="max-h-[34dvh] w-full object-contain bg-[#FAFAFA]"
+                  />
+                  <div className="px-6 py-4">
+                    <p className="text-sm font-light leading-relaxed text-zinc-600">
+                      {activeImage.description}
+                    </p>
+                  </div>
+                </section>
+              ) : null}
+
+              {showCanvasScene ? (
+                <TutorCanvasHost
+                  canvas={snapshot.canvas}
+                  disabled={snapshot.status === 'completed'}
+                  onMoveToken={onMoveToken}
+                  onChooseEquationAnswer={onChooseEquationAnswer}
+                  onFillBlankSubmit={onFillBlankSubmit}
+                  onCodeSubmit={onCodeSubmit}
+                  onCanvasSubmit={onCanvasSubmit}
+                />
+              ) : null}
            </div>
          ) : null}
       </div>

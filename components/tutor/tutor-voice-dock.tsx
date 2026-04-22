@@ -9,16 +9,21 @@ import {
   type AssemblyAiTurnMessage,
 } from '@/lib/stt/assemblyai-streaming';
 import { appendPcmChunks } from '@/lib/stt/pcm-chunker';
-import { isMeaningfulTutorTranscript } from '@/lib/tutor/intake-heuristics';
-import { VadEngine } from '@/lib/vad/vad-engine';
+import { shouldAcceptBargeInTranscript, transcribeVadAudio } from '@/lib/vad/barge-in-transcription';
+import { SileroMicVadController } from '@/lib/vad/silero-mic-vad';
 
 interface TutorVoiceDockProps {
   disabled?: boolean;
+  maintainConnection?: boolean;
   speechToTextEnabled?: boolean;
   runtimeStatus?: 'loading' | 'ready' | 'error';
   teacherSpeaking?: boolean;
+  teacherAudioPending?: boolean;
+  teacherSpeechText?: string;
   onTranscript: (text: string) => Promise<void> | void;
-  onSpeechStart?: () => void;
+  onBargeInStart?: () => void;
+  onBargeInCancel?: () => void;
+  onBargeInCommit?: () => void;
   onTextSubmit?: (text: string) => Promise<void> | void;
 }
 
@@ -95,11 +100,16 @@ function computeLevel(samples: Float32Array) {
 
 export function TutorVoiceDock({
   disabled = false,
+  maintainConnection = true,
   speechToTextEnabled = false,
   runtimeStatus = 'loading',
   teacherSpeaking = false,
+  teacherAudioPending = false,
+  teacherSpeechText = '',
   onTranscript,
-  onSpeechStart,
+  onBargeInStart,
+  onBargeInCancel,
+  onBargeInCommit,
   onTextSubmit,
 }: TutorVoiceDockProps) {
   const [micEnabled, setMicEnabled] = useState(true);
@@ -122,29 +132,64 @@ export function TutorVoiceDock({
   const restartingRef = useRef(false);
   const canAutoListenRef = useRef(false);
   const onTranscriptRef = useRef(onTranscript);
+  const onBargeInStartRef = useRef(onBargeInStart);
+  const onBargeInCancelRef = useRef(onBargeInCancel);
+  const onBargeInCommitRef = useRef(onBargeInCommit);
+  const teacherSpeakingRef = useRef(teacherSpeaking);
+  const teacherSpeechTextRef = useRef(teacherSpeechText);
+  const teacherAudioPendingRef = useRef(teacherAudioPending);
   const streamStartIdRef = useRef(0);
   const pendingPcmSamplesRef = useRef<number[]>([]);
   const sttSuppressedRef = useRef(false);
-  const vadRef = useRef<VadEngine>(new VadEngine());
+  const activeBargeInIdRef = useRef<number | null>(null);
+  const nextBargeInIdRef = useRef(0);
+  const ignoreNextCompletedTranscriptRef = useRef(false);
+  const sileroVadRef = useRef<SileroMicVadController>(new SileroMicVadController());
 
-  const canAutoListen = micEnabled && !disabled && runtimeStatus === 'ready' && speechToTextEnabled && inputMode === 'voice';
+  const canMaintainConnection =
+    maintainConnection &&
+    micEnabled &&
+    runtimeStatus === 'ready' &&
+    speechToTextEnabled &&
+    inputMode === 'voice';
 
   useEffect(() => {
-    canAutoListenRef.current = canAutoListen;
-  }, [canAutoListen]);
+    canAutoListenRef.current = canMaintainConnection;
+  }, [canMaintainConnection]);
 
   useEffect(() => {
     onTranscriptRef.current = onTranscript;
   }, [onTranscript]);
 
-  // VAD echo suppression: notify VAD when TTS starts/stops
   useEffect(() => {
-    const vad = vadRef.current;
+    onBargeInStartRef.current = onBargeInStart;
+  }, [onBargeInStart]);
+
+  useEffect(() => {
+    onBargeInCancelRef.current = onBargeInCancel;
+  }, [onBargeInCancel]);
+
+  useEffect(() => {
+    onBargeInCommitRef.current = onBargeInCommit;
+  }, [onBargeInCommit]);
+
+  useEffect(() => {
+    teacherSpeakingRef.current = teacherSpeaking;
+  }, [teacherSpeaking]);
+
+  useEffect(() => {
+    teacherSpeechTextRef.current = teacherSpeechText;
+  }, [teacherSpeechText]);
+
+  useEffect(() => {
+    teacherAudioPendingRef.current = teacherAudioPending;
+  }, [teacherAudioPending]);
+
+  useEffect(() => {
+    sileroVadRef.current.setTeacherSpeaking(teacherSpeaking);
     if (teacherSpeaking) {
-      vad.notifyTtsStarted();
       sttSuppressedRef.current = true;
     } else {
-      vad.notifyTtsStopped();
       // Small delay before unsuppressing STT to avoid echo tail
       const timer = setTimeout(() => {
         sttSuppressedRef.current = false;
@@ -152,22 +197,6 @@ export function TutorVoiceDock({
       return () => clearTimeout(timer);
     }
   }, [teacherSpeaking]);
-
-  // VAD barge-in callback
-  useEffect(() => {
-    const vad = vadRef.current;
-    vad.onSpeechStart = () => {
-      if (teacherSpeaking) {
-        onSpeechStart?.();
-        sttSuppressedRef.current = false;
-      }
-    };
-    vad.onSpeechEnd = null;
-    return () => {
-      vad.onSpeechStart = null;
-      vad.onSpeechEnd = null;
-    };
-  }, [onSpeechStart, teacherSpeaking]);
 
   const clearConnectionTimeout = useCallback(() => {
     const timeoutId = connectionTimeoutRef.current;
@@ -181,6 +210,10 @@ export function TutorVoiceDock({
     stoppingRef.current = true;
     streamStartIdRef.current += 1;
     clearConnectionTimeout();
+    activeBargeInIdRef.current = null;
+    ignoreNextCompletedTranscriptRef.current = false;
+
+    await sileroVadRef.current.pause();
 
     const workletNode = workletNodeRef.current;
     if (workletNode) {
@@ -256,8 +289,6 @@ export function TutorVoiceDock({
       }
     }
 
-    vadRef.current.reset();
-
     if (mountedRef.current) {
       setStreamingState(nextState);
       setVoiceLevel(0);
@@ -266,7 +297,7 @@ export function TutorVoiceDock({
   }, [clearConnectionTimeout]);
 
   const startStreaming = useCallback(async () => {
-    if (!canAutoListen || restartingRef.current || streamingState === 'connecting' || streamingState === 'listening') {
+    if (!canMaintainConnection || restartingRef.current || streamingState === 'connecting' || streamingState === 'listening') {
       return;
     }
 
@@ -352,21 +383,110 @@ export function TutorVoiceDock({
       workletGainRef.current = gainNode;
       websocketRef.current = websocket;
 
+      await sileroVadRef.current.start(
+        mediaStream,
+        () => {
+          if (!teacherSpeakingRef.current || activeBargeInIdRef.current !== null) {
+            return;
+          }
+
+          const teacherSpeech = teacherSpeechTextRef.current.trim();
+          if (!teacherSpeech) {
+            return;
+          }
+
+          activeBargeInIdRef.current = nextBargeInIdRef.current + 1;
+          nextBargeInIdRef.current = activeBargeInIdRef.current;
+          sttSuppressedRef.current = false;
+          if (mountedRef.current) {
+            setTranscript('');
+          }
+          onBargeInStartRef.current?.();
+        },
+        async (audio) => {
+          const candidateId = activeBargeInIdRef.current;
+          if (candidateId === null) {
+            return;
+          }
+
+          const teacherSpeech = teacherSpeechTextRef.current.trim();
+
+          try {
+            if (activeBargeInIdRef.current !== candidateId) {
+              return;
+            }
+
+            if (!teacherSpeech) {
+              if (activeBargeInIdRef.current === candidateId) {
+                activeBargeInIdRef.current = null;
+                if (teacherSpeakingRef.current) {
+                  sttSuppressedRef.current = true;
+                }
+                onBargeInCancelRef.current?.();
+              }
+              return;
+            }
+
+            const transcriptText = await transcribeVadAudio(audio);
+            if (activeBargeInIdRef.current !== candidateId) {
+              return;
+            }
+
+            if (!shouldAcceptBargeInTranscript(transcriptText, teacherSpeech)) {
+              if (activeBargeInIdRef.current === candidateId) {
+                activeBargeInIdRef.current = null;
+                if (teacherSpeakingRef.current) {
+                  sttSuppressedRef.current = true;
+                }
+                onBargeInCancelRef.current?.();
+              }
+              return;
+            }
+
+            activeBargeInIdRef.current = null;
+            sttSuppressedRef.current = false;
+            ignoreNextCompletedTranscriptRef.current = true;
+            onBargeInCommitRef.current?.();
+            if (mountedRef.current) {
+              setStreamingState('processing');
+              setTranscript('');
+            }
+            await onTranscriptRef.current(transcriptText);
+            if (mountedRef.current && canAutoListenRef.current && !stoppingRef.current) {
+              setStreamingState('listening');
+            }
+          } catch {
+            if (activeBargeInIdRef.current === candidateId) {
+              activeBargeInIdRef.current = null;
+              if (teacherSpeakingRef.current) {
+                sttSuppressedRef.current = true;
+              }
+              onBargeInCancelRef.current?.();
+            }
+          }
+        },
+        () => {
+          const candidateId = activeBargeInIdRef.current;
+          if (candidateId === null) {
+            return;
+          }
+
+          activeBargeInIdRef.current = null;
+          if (teacherSpeakingRef.current) {
+            sttSuppressedRef.current = true;
+          }
+          onBargeInCancelRef.current?.();
+        }
+      );
+      sileroVadRef.current.setTeacherSpeaking(teacherSpeaking);
+
       workletNode.port.onmessage = (event) => {
         const floatSamples = event.data instanceof Float32Array
           ? event.data
           : new Float32Array(event.data as ArrayLike<number>);
-        const level = computeLevel(floatSamples);
+          const level = computeLevel(floatSamples);
         if (mountedRef.current) {
           setVoiceLevel(level);
-        }
-
-        // Feed level to VAD for barge-in detection (always, even during TTS)
-        vadRef.current.feedLevel(level);
-
-        // During TTS or echo cooldown, don't forward audio to STT
-        if (sttSuppressedRef.current) {
-          return;
         }
 
         if (websocket.readyState !== WebSocket.OPEN) {
@@ -374,7 +494,11 @@ export function TutorVoiceDock({
         }
 
         const pcm = downsampleToInt16(floatSamples, audioContext.sampleRate);
-        const chunks = appendPcmChunks(pendingPcmSamplesRef.current, pcm);
+        const outgoingPcm =
+          sttSuppressedRef.current || teacherAudioPendingRef.current
+            ? new Int16Array(pcm.length)
+            : pcm;
+        const chunks = appendPcmChunks(pendingPcmSamplesRef.current, outgoingPcm);
         for (const chunk of chunks) {
           websocket.send(chunk.buffer);
         }
@@ -398,8 +522,8 @@ export function TutorVoiceDock({
           return;
         }
 
-        // Drop transcripts while STT is suppressed (during TTS)
-        if (sttSuppressedRef.current) {
+        // Drop transcripts while live STT is intentionally suppressed.
+        if (sttSuppressedRef.current || teacherAudioPendingRef.current) {
           return;
         }
 
@@ -414,12 +538,42 @@ export function TutorVoiceDock({
         }
 
         const completedTranscript = resolveAssemblyAiCompletedTranscript(payload);
-        if (completedTranscript) {
-          if (!isMeaningfulTutorTranscript(completedTranscript)) {
-            setTranscript('');
-            setStreamingState('listening');
+        const activeBargeInId = activeBargeInIdRef.current;
+        if (completedTranscript && activeBargeInId !== null) {
+          const teacherSpeech = teacherSpeechTextRef.current.trim();
+
+          if (!shouldAcceptBargeInTranscript(completedTranscript, teacherSpeech)) {
+            if (activeBargeInIdRef.current === activeBargeInId) {
+              activeBargeInIdRef.current = null;
+              if (teacherSpeakingRef.current) {
+                sttSuppressedRef.current = true;
+              }
+              setTranscript('');
+              onBargeInCancelRef.current?.();
+            }
             return;
           }
+
+          if (activeBargeInIdRef.current === activeBargeInId) {
+            activeBargeInIdRef.current = null;
+            sttSuppressedRef.current = false;
+            onBargeInCommitRef.current?.();
+            setStreamingState('processing');
+            setTranscript('');
+            await onTranscriptRef.current(completedTranscript);
+            if (mountedRef.current && canAutoListenRef.current && !stoppingRef.current) {
+              setStreamingState('listening');
+            }
+          }
+          return;
+        }
+
+        if (completedTranscript) {
+          if (ignoreNextCompletedTranscriptRef.current) {
+            ignoreNextCompletedTranscriptRef.current = false;
+            return;
+          }
+
           setStreamingState('processing');
           setTranscript('');
           await onTranscriptRef.current(completedTranscript);
@@ -460,19 +614,21 @@ export function TutorVoiceDock({
     } finally {
       restartingRef.current = false;
     }
-  }, [canAutoListen, clearConnectionTimeout, stopStreaming, streamingState]);
+  }, [canMaintainConnection, clearConnectionTimeout, stopStreaming, streamingState, teacherSpeaking]);
 
   useEffect(() => {
     mountedRef.current = true;
+    const sileroVad = sileroVadRef.current;
     return () => {
       mountedRef.current = false;
       clearConnectionTimeout();
       void stopStreaming('idle');
+      void sileroVad.destroy();
     };
   }, [clearConnectionTimeout, stopStreaming]);
 
   useEffect(() => {
-    if (!canAutoListen) {
+    if (!canMaintainConnection) {
       if (streamingState !== 'idle') {
         void stopStreaming('idle');
       }
@@ -482,7 +638,7 @@ export function TutorVoiceDock({
     if (streamingState === 'idle') {
       void startStreaming();
     }
-  }, [canAutoListen, startStreaming, stopStreaming, streamingState]);
+  }, [canMaintainConnection, startStreaming, stopStreaming, streamingState]);
 
   const statusText = useMemo(() => {
     if (inputMode === 'text') {
@@ -496,6 +652,9 @@ export function TutorVoiceDock({
     }
     if (runtimeStatus === 'loading') {
       return 'Checking voice services...';
+    }
+    if (teacherAudioPending) {
+      return 'Tutor voice starting...';
     }
     if (teacherSpeaking) {
       return 'Tutor speaking — say something to interrupt';
@@ -513,7 +672,7 @@ export function TutorVoiceDock({
       return transcript;
     }
     return 'Listening...';
-  }, [error, inputMode, micEnabled, runtimeStatus, speechToTextEnabled, streamingState, teacherSpeaking, transcript]);
+  }, [error, inputMode, micEnabled, runtimeStatus, speechToTextEnabled, streamingState, teacherAudioPending, teacherSpeaking, transcript]);
 
   const bars = [12, 22, 30, 22, 12];
   const listening = streamingState === 'listening';

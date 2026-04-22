@@ -179,4 +179,54 @@ describe('TutorVoicePlayer', () => {
     expect(audioInstance?.pause).toHaveBeenCalled();
     expect(onComplete).toHaveBeenCalled();
   });
+
+  it('pauses and resumes active tutor playback while barge-in is being verified', async () => {
+    const { rerender } = render(
+      <TutorVoicePlayer
+        text="Hello there"
+        voiceId="voice-1"
+        provider="elevenlabs"
+        modelId="eleven_turbo_v2_5"
+        enabled
+        playToken={1}
+        paused={false}
+      />
+    );
+
+    await waitFor(() => {
+      expect(MockAudio.playImpl).toHaveBeenCalledTimes(1);
+    });
+
+    const audioInstance = MockAudio.instances[0];
+
+    rerender(
+      <TutorVoicePlayer
+        text="Hello there"
+        voiceId="voice-1"
+        provider="elevenlabs"
+        modelId="eleven_turbo_v2_5"
+        enabled
+        playToken={1}
+        paused
+      />
+    );
+
+    expect(audioInstance?.pause).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <TutorVoicePlayer
+        text="Hello there"
+        voiceId="voice-1"
+        provider="elevenlabs"
+        modelId="eleven_turbo_v2_5"
+        enabled
+        playToken={1}
+        paused={false}
+      />
+    );
+
+    await waitFor(() => {
+      expect(audioInstance?.play).toHaveBeenCalledTimes(2);
+    });
+  });
 });

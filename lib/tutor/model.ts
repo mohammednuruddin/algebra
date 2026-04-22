@@ -1,8 +1,14 @@
-import { buildOpenRouterRequest } from '@/lib/ai/openrouter';
-import { shouldAutoStartTutorLesson } from '@/lib/tutor/intake-heuristics';
+import {
+  buildOpenRouterRequest,
+  type OpenRouterContentPart,
+  type OpenRouterMessage,
+} from '@/lib/ai/openrouter';
+import { formatTutorDebugMessages, formatTutorDebugValue } from '@/lib/tutor/debug-log';
 import type {
   TutorAwaitMode,
+  TutorCanvasAction,
   TutorCanvasCommand,
+  TutorCanvasEvidence,
   TutorMediaAsset,
   TutorLlmDebugTrace,
   TutorSessionStatus,
@@ -11,6 +17,7 @@ import type {
 export interface TutorModelResponse {
   speech: string;
   awaitMode: TutorAwaitMode;
+  canvasAction: TutorCanvasAction;
   commands: TutorCanvasCommand[];
   sessionComplete: boolean;
   status: TutorSessionStatus;
@@ -41,10 +48,20 @@ interface TutorLessonPreparation {
   desiredImageCount: number;
 }
 
-type TutorMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
+const LIVE_TUTOR_PERSONALITY_GUIDANCE = [
+  'You are a warm, encouraging, emotionally aware live tutor, closer to the Zo tutor style than a sterile worksheet bot.',
+  'Sound like a kind human coach: calm, compassionate, lightly playful when it fits, and never cold or mechanical.',
+  'Meet the learner where they are. If they are confused, frustrated, embarrassed, or stuck, briefly validate that feeling, lower the pressure, and make the next step feel doable.',
+  'If the learner gets something right, celebrate it naturally and move forward with momentum.',
+  'Use short, vivid, conversational phrasing instead of textbook language. You may be gently fun, but do not become cheesy, try-hard, or distracting.',
+  'Vary your encouragement. Do not repeat the same praise formula every turn.',
+  'Do not sound bossy. Guide, coach, reassure, and teach.',
+].join(' ');
+
+const LIVE_TUTOR_PERSONALITY_SHORT_GUIDANCE =
+  'Keep the tutor warm, encouraging, emotionally aware, and lightly playful like Zo. Avoid robotic or worksheet-like tone.';
+
+type TutorMessage = OpenRouterMessage;
 
 type Sanitized<T> = {
   response: T;
@@ -125,6 +142,42 @@ function sanitizeAwaitMode(
   };
 }
 
+function inferCanvasAction(commands: TutorCanvasCommand[]): TutorCanvasAction {
+  if (commands.length === 0) {
+    return 'keep';
+  }
+
+  const imageOnlyCommands = commands.every(
+    (command) => command.type === 'show_image' || command.type === 'clear_image'
+  );
+
+  if (imageOnlyCommands) {
+    return 'clear';
+  }
+
+  return 'replace';
+}
+
+function sanitizeCanvasAction(
+  value: unknown,
+  fallbackAction: TutorCanvasAction
+): { canvasAction: TutorCanvasAction; issue: string | null } {
+  if (value === 'keep' || value === 'replace' || value === 'clear') {
+    return {
+      canvasAction: value,
+      issue: null,
+    };
+  }
+
+  return {
+    canvasAction: fallbackAction,
+    issue:
+      value == null
+        ? null
+        : `Invalid canvasAction ${formatDebugValue(value)} normalized to ${fallbackAction}`,
+  };
+}
+
 function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
   if (!Array.isArray(value)) {
     return [];
@@ -142,9 +195,27 @@ function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
 
     switch (type) {
       case 'set_mode': {
+        const mode = trimmed(command.mode || command.value);
+        if (
+          mode !== 'distribution' &&
+          mode !== 'equation' &&
+          mode !== 'fill_blank' &&
+          mode !== 'code_block' &&
+          mode !== 'multiple_choice' &&
+          mode !== 'number_line' &&
+          mode !== 'table_grid' &&
+          mode !== 'graph_plot' &&
+          mode !== 'matching_pairs' &&
+          mode !== 'ordering' &&
+          mode !== 'text_response' &&
+          mode !== 'drawing'
+        ) {
+          break;
+        }
+
         commands.push({
           type: 'set_mode',
-          mode: trimmed(command.mode, 'distribution'),
+          mode,
         } as TutorCanvasCommand);
         break;
       }
@@ -418,6 +489,8 @@ function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
           type: 'set_drawing',
           prompt: trimmed(command.prompt, 'Draw your answer.'),
           ...(typeof command.backgroundImageUrl === 'string' ? { backgroundImageUrl: command.backgroundImageUrl } : {}),
+          ...(typeof command.imageId === 'string' ? { imageId: command.imageId } : {}),
+          ...(typeof command.imageIndex === 'number' ? { imageIndex: command.imageIndex } : {}),
           ...(typeof command.canvasWidth === 'number' ? { canvasWidth: command.canvasWidth } : {}),
           ...(typeof command.canvasHeight === 'number' ? { canvasHeight: command.canvasHeight } : {}),
           ...(typeof command.brushColor === 'string' ? { brushColor: command.brushColor } : {}),
@@ -452,16 +525,22 @@ function sanitizeTutorResponse(value: unknown): Sanitized<TutorModelResponse> | 
   const commands = sanitizeCommands(record.commands);
   const fallbackAwaitMode = commands.length > 0 ? 'voice_or_canvas' : 'voice';
   const awaitMode = sanitizeAwaitMode(record.awaitMode, fallbackAwaitMode);
+  const canvasAction = sanitizeCanvasAction(
+    record.canvasAction,
+    inferCanvasAction(commands)
+  );
+  const issues = [awaitMode.issue, canvasAction.issue].filter(Boolean) as string[];
 
   return {
     response: {
       speech,
       awaitMode: awaitMode.awaitMode,
+      canvasAction: canvasAction.canvasAction,
       commands,
       sessionComplete: record.sessionComplete === true,
       status: record.sessionComplete === true ? 'completed' : 'active',
     },
-    issues: awaitMode.issue ? [awaitMode.issue] : [],
+    issues,
   };
 }
 
@@ -469,6 +548,7 @@ function sanitizeTutorIntakeResponse(
   value: unknown,
   context: { latestUserMessage?: string | null }
 ): Sanitized<TutorIntakeResponse> | null {
+  void context;
   if (!value || typeof value !== 'object') {
     return null;
   }
@@ -484,19 +564,7 @@ function sanitizeTutorIntakeResponse(
   const learnerLevel = trimmed(record.learnerLevel) || null;
   const awaitMode = sanitizeAwaitMode(record.awaitMode, 'voice');
   const issues = awaitMode.issue ? [awaitMode.issue] : [];
-  let readyToStartLesson = record.readyToStartLesson === true && Boolean(topic);
-
-  if (
-    !readyToStartLesson &&
-    shouldAutoStartTutorLesson({
-      topic,
-      learnerLevel,
-      latestUserMessage: context.latestUserMessage,
-    })
-  ) {
-    readyToStartLesson = true;
-    issues.push('Promoted readyToStartLesson from tutor intake heuristics');
-  }
+  const readyToStartLesson = record.readyToStartLesson === true && Boolean(topic);
 
   return {
     response: {
@@ -515,10 +583,25 @@ function logTutorDebug(debug: TutorLlmDebugTrace) {
     return;
   }
 
-  console.log(`[tutor:${debug.stage}] system prompt + history`, debug.messages);
-  console.log(`[tutor:${debug.stage}] raw response text`, debug.rawResponseText);
-  console.log(`[tutor:${debug.stage}] raw model content`, debug.rawModelContent);
-  console.log(`[tutor:${debug.stage}] parsed response`, debug.parsedResponse);
+  console.log(
+    `[tutor:${debug.stage}] system prompt + history\n${JSON.stringify(
+      formatTutorDebugMessages(debug.messages),
+      null,
+      2
+    )}`
+  );
+  console.log(
+    `[tutor:${debug.stage}] raw response text`,
+    formatTutorDebugValue(debug.rawResponseText)
+  );
+  console.log(
+    `[tutor:${debug.stage}] raw model content`,
+    formatTutorDebugValue(debug.rawModelContent)
+  );
+  console.log(
+    `[tutor:${debug.stage}] parsed response`,
+    formatTutorDebugValue(debug.parsedResponse)
+  );
   console.log(`[tutor:${debug.stage}] fallback`, {
     usedFallback: debug.usedFallback,
     fallbackReason: debug.fallbackReason,
@@ -635,12 +718,11 @@ function buildEquationFallback(prompt: string): TutorModelResponse {
   return {
     speech: `Let’s start. How would you solve ${left} plus ${right}? Talk me through it.`,
     awaitMode: 'voice_or_canvas',
+    canvasAction: 'replace',
     sessionComplete: false,
     status: 'active',
     commands: [
       { type: 'set_mode', mode: 'equation' },
-      { type: 'set_headline', headline: 'Equation board' },
-      { type: 'set_instruction', instruction: 'Pick a result, then explain why it works.' },
       {
         type: 'set_equation',
         prompt: 'Choose the result that fits the expression.',
@@ -667,12 +749,11 @@ export function buildInitialTutorFallback(prompt: string): TutorModelResponse {
   return {
     speech: `Let’s begin with ${prompt.trim()}. Move the board pieces and tell me what you already know.`,
     awaitMode: 'voice_or_canvas',
+    canvasAction: 'replace',
     sessionComplete: false,
     status: 'active',
     commands: [
       { type: 'set_mode', mode: 'distribution' },
-      { type: 'set_headline', headline: 'Thinking board' },
-      { type: 'set_instruction', instruction: 'Sort ideas before you explain your next move.' },
       {
         type: 'set_zones',
         zones: [
@@ -696,28 +777,11 @@ function buildTutorIntakeFallback(args: {
   const topic = trimmed(args.topic) || null;
   const learnerLevel = trimmed(args.learnerLevel) || null;
 
-  if (
-    topic &&
-    shouldAutoStartTutorLesson({
-      topic,
-      learnerLevel,
-      latestUserMessage: args.latestUserMessage,
-    })
-  ) {
+  if (topic) {
     return {
       speech: `Let’s start with ${topic}. What do you already know about it?`,
       awaitMode: 'voice',
       readyToStartLesson: true,
-      topic,
-      learnerLevel,
-    };
-  }
-
-  if (topic) {
-    return {
-      speech: `We can work on ${topic}. What part would you like to understand first?`,
-      awaitMode: 'voice',
-      readyToStartLesson: false,
       topic,
       learnerLevel,
     };
@@ -747,7 +811,7 @@ export async function generateTutorIntakeTurn(args: {
     {
       role: 'system',
       content:
-        'You are the opening intake for a live AI tutor. Return strict JSON only with keys speech, awaitMode, readyToStartLesson, topic, learnerLevel. awaitMode must be exactly "voice" or "voice_or_canvas" and nothing else. RULES: (1) Be extremely brief — one short sentence max. (2) As soon as you can identify a topic, set readyToStartLesson=true IMMEDIATELY. Do not ask follow-up questions about goals, sub-topics, or preferences. The learner wants to learn, not answer a questionnaire. (3) If the learner gives a topic (even without a level), set readyToStartLesson=true and infer learnerLevel as "beginner" if not stated. (4) If the learner asks a content question, set readyToStartLesson=true with the topic extracted from their question. (5) Only ask "What do you want to learn?" if you truly have zero topic information. (6) Never ask more than one intake question total. topic = concise normalized topic or null. learnerLevel = short phrase or null. Never mention setup, stages, forms, titles, or labels.',
+        'You are the opening intake for a live AI tutor. Return strict JSON only with keys speech, awaitMode, readyToStartLesson, topic, learnerLevel. awaitMode must be exactly "voice" or "voice_or_canvas" and nothing else. RULES: (1) Be extremely brief — 1 sentence max. (2) As soon as you can identify a topic and level of user, set readyToStartLesson=true IMMEDIATELY. Do not ask follow-up questions about goals, sub-topics, or preferences. Do not ask whether this is for class, motivation, or curiosity. The learner wants to learn, not answer a questionnaire. (3) If the learner asks a content question, set readyToStartLesson=true with the topic extracted from their question. (5) Only ask "What do you want to learn?" if you truly have zero topic information. (6) Never ask more than one intake question total. topic = concise normalized topic or null. learnerLevel = short phrase or null. Never mention setup, stages, forms, titles, or labels.',
     },
     {
       role: 'user',
@@ -868,8 +932,9 @@ export function buildTurnTutorFallback(args: {
 
   if (/(done|i get it|i understand|finished|that makes sense)/i.test(lower)) {
     return {
-      speech: 'Nice work. You have enough to move on, so I’m wrapping this round here.',
+      speech: 'Nice work. You really did get it, so we can wrap this round here.',
       awaitMode: 'voice',
+      canvasAction: 'clear',
       sessionComplete: true,
       status: 'completed',
       commands: [{ type: 'complete_session' }],
@@ -877,8 +942,9 @@ export function buildTurnTutorFallback(args: {
   }
 
   return {
-    speech: `Good. Keep going. Right now I see: ${args.canvasSummary}`,
+    speech: `You’re okay. Let’s take the next small step together. Right now I see: ${args.canvasSummary}`,
     awaitMode: 'voice_or_canvas',
+    canvasAction: 'keep',
     sessionComplete: false,
     status: 'active',
     commands: [],
@@ -893,7 +959,7 @@ export async function generateLessonPreparation(input: {
     {
       role: 'system',
       content:
-        'You are preparing a conversational lesson. Return strict JSON only with keys openingSpeech, outline, imageSearchQuery, desiredImageCount. The lesson should be speech-first and fluid, not a task list. desiredImageCount must be an integer from 0 to 4. Ask for images only if they will genuinely help later explanation. Do not generate titles or labels.',
+        `You are preparing a conversational lesson. ${LIVE_TUTOR_PERSONALITY_SHORT_GUIDANCE} Return strict JSON only with keys openingSpeech, outline, imageSearchQuery, desiredImageCount. The lesson should be speech-first and fluid, not a task list. desiredImageCount must be an integer from 0 to 5. Ask for images only if they will genuinely help later explanation. Do not generate titles or labels. The openingSpeech should already sound warm, welcoming, and human.`,
     },
     {
       role: 'user',
@@ -905,8 +971,7 @@ export async function generateLessonPreparation(input: {
     const outbound = buildOpenRouterRequest({
       messages,
       response_format: { type: 'json_object' },
-      temperature: 0.2,
-      max_tokens: 700,
+      temperature: 0.7,
     });
     const response = await fetch(outbound.url, {
       method: 'POST',
@@ -963,11 +1028,11 @@ export async function generateInitialTutorResponse(input: {
     {
       role: 'system',
       content:
-        'You are a live speech-first tutor. Return strict JSON with keys speech, awaitMode, sessionComplete, commands. awaitMode: voice or voice_or_canvas. TEACHING RULES: (1) Actually TEACH — explain a concept, give a fact, describe what is happening, or build on what the learner said. Do not just ask questions back-to-back. (2) Keep speech to 2-3 sentences: one sentence teaching, one engaging the learner. (3) Never leave dead air — always pair speech with a visual (show_image) or interactive activity (canvas command) so the learner has something to see and do. (4) Show images early and often when available — they make the lesson come alive. (5) Use canvas modes to make learning hands-on, not passive. This is turn-by-turn dialogue, not a lecture — but each turn must TEACH something new. Every command uses key "type". Allowed commands: set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, complete_session. Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl, canvasWidth, canvasHeight, brushColor, brushSize). Use the most appropriate canvas mode for each teaching moment.',
+        `You are a live speech-first tutor. ${LIVE_TUTOR_PERSONALITY_GUIDANCE} Return strict JSON with keys speech, awaitMode, sessionComplete, canvasAction, commands. awaitMode: voice or voice_or_canvas. canvasAction must be exactly keep, replace, or clear. TEACHING RULES: (1) Actually TEACH — explain a concept, give a fact, describe what is happening, or build on what the learner said. Do not just ask questions back-to-back. (2) Keep speech to 2-3 sentences: one sentence teaching, one engaging the learner. (3) Never leave dead air — give the learner something to say, look at, or do, but commands can be empty when speech alone is enough. (4) Show images when available and genuinely helpful. (5) Use canvas modes only when they directly help this exact teaching moment. (6) The speech must always match the commands. Do not say one thing and spawn a different task. (7) It is not compulsory to always show something; you may just be talking or asking. (8) If you ask the learner to look at an image or diagram, do not spawn an unrelated quiz or task in the same turn. Either just show the image, or make any canvas task directly about that same image. (9) If you ask the learner to point, mark, circle, trace, or identify a part on an image, use set_drawing and attach that same image via imageId, imageIndex, or backgroundImageUrl so the learner can mark it. Explicitly tell the learner which drawing color to use, and keep that aligned with brushColor. (10) canvasAction rules: keep = preserve the current canvas/task, replace = swap in a new task and discard the old one, clear = remove the current canvas task. (11) For code_block tasks, starterCode must contain only real code the learner should keep or edit. Never put instructional placeholder comments or prose inside starterCode such as "# Type your math here and press Enter". If no starter code is needed, use an empty string and keep the instruction in prompt instead. Every command uses key "type". Allowed commands: set_mode, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, complete_session. Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl or imageId or imageIndex, canvasWidth, canvasHeight, brushColor, brushSize). Use the most appropriate canvas mode for each teaching moment.`,
     },
     {
       role: 'user',
-      content: `Topic: ${input.topic}\nLearner level: ${input.learnerLevel}\nPreparation outline:\n- ${input.outline.join('\n- ')}\nPrepared images:\n${imageContext}\nOpening prep speech: ${input.openingSpeech}\n\nPrepare the opening live tutor turn. If an image would help immediately, use show_image. If a canvas scene helps, set it up.`,
+      content: `Topic: ${input.topic}\nLearner level: ${input.learnerLevel}\nPreparation outline:\n- ${input.outline.join('\n- ')}\nPrepared images:\n${imageContext}\nOpening prep speech: ${input.openingSpeech}\n\nPrepare the opening live tutor turn. If an image would help immediately, use show_image. If a canvas scene helps, set it up. It is valid to return no canvas commands at all. If you tell the learner to inspect an image or diagram, do not also spawn a separate unrelated quiz in that same turn.`,
     },
   ];
 
@@ -1005,7 +1070,14 @@ export async function generateTutorTurn(args: {
   activeImageId: string | null;
   transcript: string;
   canvasSummary: string;
+  canvasStateContext?: string;
+  latestLearnerTurnContext?: string;
+  recentTurnFrames?: string;
   recentTurns: string;
+  canvasTaskPrompt?: string | null;
+  canvasReferenceImageUrl?: string | null;
+  canvasBrushColor?: string | null;
+  canvasEvidence?: TutorCanvasEvidence | null;
 }): Promise<TutorModelResult> {
   const imageContext = args.imageAssets.length
     ? args.imageAssets
@@ -1018,13 +1090,81 @@ export async function generateTutorTurn(args: {
     {
       role: 'system',
       content:
-        'You are a live tutor in a speech-and-canvas product. Return strict JSON with keys speech, awaitMode, sessionComplete, commands. awaitMode: voice or voice_or_canvas. TEACHING RULES: (1) TEACH first — explain a concept, state a fact, describe what the learner is seeing, or connect to what they just said. Do not just ask questions without teaching. (2) Keep speech to 2-3 concise sentences: teach something, then prompt the learner to respond or interact. (3) Never leave dead air — always give the learner something to look at (show_image) or do (canvas interaction). If an image is available and relevant, show it. (4) Use canvas modes actively — set up activities the learner can interact with (multiple_choice, fill_blank, matching_pairs, etc.) so learning is hands-on. (5) When the learner answers, give immediate feedback: say whether they are right, explain why, then move forward. (6) Progress through the lesson outline — do not get stuck repeating the same question. Every command uses key "type". Allowed commands: set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, complete_session. Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl, canvasWidth, canvasHeight, brushColor, brushSize). Use the best canvas mode for each teaching moment.'
-    },
-    {
-      role: 'user',
-      content: `Topic: ${args.topic}\nLearner level: ${args.learnerLevel}\nLesson outline:\n- ${args.outline.join('\n- ')}\nAvailable images:\n${imageContext}\nCurrently shown image: ${activeImageContext}\nLatest learner transcript: ${args.transcript}\nCurrent canvas summary: ${args.canvasSummary}\nRecent dialogue: ${args.recentTurns}\n\nReturn the next live tutor turn. Only change the board or image when that helps the explanation.`,
+        `You are Tibia, a funny and supportive live tutor in a speech-and-canvas. ${LIVE_TUTOR_PERSONALITY_GUIDANCE} Return strict JSON with keys speech, awaitMode, sessionComplete, canvasAction, commands. awaitMode: voice or voice_or_canvas. canvasAction must be exactly keep, replace, or clear. Persona: You must be funny and nice to talk to. But must be brief in your speech. If user says something unrelated, just create something fun from that and redirect them to the lesson. Use stop words a lot for natural sounding. like 'um', 'huh', 'you know' etc.\n\n TEACHING RULES: (1) TEACH first — explain a concept, state a fact, describe what the learner is seeing, or connect to what they just said. Do not just ask questions without teaching. (2) Keep speech to 2-3 concise sentences: teach something, then prompt the learner to respond or interact. (3) Never leave dead air — give the learner something to say, look at, or do, but commands can be empty when speech alone is enough. (4) If an image is available and relevant, show it. (5) Use canvas modes actively only when they directly support this exact teaching move. (6) The speech must always match the commands. Do not say one thing and spawn a different thing. And if you spawn something, then direct then user towards it in your speech. (7) Read the structured current canvas state and structured turn history carefully; prefer them over any lossy prose summary. The recent turn history is chronological oldest first, newest last. (8) If you ask the learner to look at an image or diagram, do not spawn an unrelated quiz or task in the same turn. Either just show the image, or make any canvas task directly about that same image. (9) If you ask the learner to point, mark, circle, trace, or identify a part on an image, use set_drawing and attach that same image via imageId, imageIndex, or backgroundImageUrl so the learner can mark it. When you do this, explicitly tell the learner which drawing color to use, and keep that aligned with brushColor. (10) When the learner answers, give immediate feedback: say whether they are right, explain why, then move forward. Always be brief in your speech so that you dont bore the student. If their answer is correct or substantially correct, acknowledge it and progress to the next concept. Do NOT ask another question about the same concept after a correct answer. (11) NEVER include the answer in your question prompt. Do not say "(Answer: ...)" or give away the solution. Let the learner think and respond. (12) Progress through the lesson outline — do not get stuck repeating the same question or asking variations of the same question. Move to new material after the learner demonstrates understanding. (13) If learner markup evidence is attached, treat it as the learner answer attempt for the current drawing task. If both the original reference image and the learner-marked image are attached, the learner marks appear only in the second image. Evaluate those marks first, acknowledge what the learner circled/pointed to, and do not talk about their markings as if they were pre-existing labels in the original diagram. canvasAction rules: keep = preserve the current canvas/task, replace = swap in a new task and discard the old one, clear = remove the current canvas task. ENDING RULES: (14) If the learner clearly wants to stop, end, be done, finish, wrap up, or call it a day, immediately set sessionComplete=true, use awaitMode="voice", and include a complete_session command. Do not keep teaching or assign another task after an explicit stop request. (15) If the learner seems to understand the current concept well enough, you may ask a brief choice such as "one more example or call it a day?" In that choice turn, keep sessionComplete=false until the learner answers. (16) If the learner answers that choice with wanting to continue, keep teaching with sessionComplete=false. If the learner answers with wanting to end, set sessionComplete=true. (17) sessionComplete should stay false unless you are either ending now or confident the learner just asked to end now. (18) For code_block tasks, starterCode must contain only real code the learner should keep or edit. Never put instructional placeholder comments or prose inside starterCode such as "# Type your math here and press Enter". If no starter code is needed, use an empty string and keep the instruction in prompt instead. Every command uses key "type". (19) Do not spawn an image or anything before asking the user if there wanna see it. If you're spwaning, int the speech, refer to it if you're asking if they wanna see, then dont spwan yet. But for UX you may mostly want to just spawn and draw their attention to it And never use this symbol \`\ if you want quote something use this '. so intead of \`name\` write 'name'..\n\nThe  Allowed commands: set_mode, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, complete_session. Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl or imageId or imageIndex, canvasWidth, canvasHeight, brushColor, brushSize). Use the best canvas mode for each teaching moment.`
     },
   ];
+
+  const canvasEvidenceContext = args.canvasEvidence?.dataUrl
+    ? [
+        'A learner markup submission is attached.',
+        args.canvasTaskPrompt ? `Current drawing task: ${args.canvasTaskPrompt}` : null,
+        args.canvasBrushColor
+          ? `Expected learner markup color for this task: ${args.canvasBrushColor}.`
+          : null,
+        args.canvasEvidence?.strokeColors?.length
+          ? `Detected markup colors in learner answer: ${args.canvasEvidence.strokeColors.join(', ')}.`
+          : null,
+        typeof args.canvasEvidence?.strokeCount === 'number'
+          ? `Detected learner stroke count: ${args.canvasEvidence.strokeCount}.`
+          : null,
+        args.canvasReferenceImageUrl
+          ? 'Attached image order: first the original reference image, then the learner\'s marked-up composite answer image.'
+          : 'The attached image is the learner\'s marked-up composite answer image.',
+        args.canvasEvidence?.overlayDataUrl
+          ? 'A final attached image is a markup-only overlay showing just the learner-added strokes without the original diagram.'
+          : null,
+        'Treat circles, arrows, highlights, traces, and scribbles in the learner answer image as the learner\'s work.',
+        'First judge whether the learner marked the right place. Explicitly acknowledge the learner markup before moving on.',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : null;
+
+  const userPrompt = `Topic: ${args.topic}\nLearner level: ${args.learnerLevel}\nLesson outline:\n- ${args.outline.join('\n- ')}\nAvailable images:\n${imageContext}\nCurrently shown image: ${activeImageContext}\nLatest learner transcript: ${args.transcript}\nLatest learner turn (structured JSON):\n${args.latestLearnerTurnContext || 'none'}\nCurrent canvas state (structured JSON):\n${args.canvasStateContext || 'none'}\nCurrent canvas summary: ${args.canvasSummary}\nCanvas evidence summary: ${args.canvasEvidence?.summary || 'none'}\nRecent turn history (structured JSON, chronological oldest first, newest last):\n${args.recentTurnFrames || '[]'}\nRecent dialogue (legacy prose summary): ${args.recentTurns}${canvasEvidenceContext ? `\n\n${canvasEvidenceContext}` : ''}\n\nReturn the next live tutor turn. Only change the board or image when that helps the explanation.`;
+
+  const userContent: string | OpenRouterContentPart[] =
+    args.canvasEvidence?.dataUrl
+      ? [
+          {
+            type: 'text',
+            text: userPrompt,
+          },
+          ...(args.canvasReferenceImageUrl
+            ? [
+                {
+                  type: 'image_url' as const,
+                  image_url: {
+                    url: args.canvasReferenceImageUrl,
+                    detail: 'high' as const,
+                  },
+                },
+              ]
+            : []),
+          {
+            type: 'image_url',
+            image_url: {
+              url: args.canvasEvidence.dataUrl,
+              detail: 'high',
+            },
+          },
+          ...(args.canvasEvidence.overlayDataUrl
+            ? [
+                {
+                  type: 'image_url' as const,
+                  image_url: {
+                    url: args.canvasEvidence.overlayDataUrl,
+                    detail: 'high' as const,
+                  },
+                },
+              ]
+            : []),
+        ]
+      : userPrompt;
+
+  messages.push({
+    role: 'user',
+    content: userContent,
+  });
 
   try {
     const result = await callModel('turn', messages);

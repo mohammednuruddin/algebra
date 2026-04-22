@@ -1,5 +1,6 @@
 import type {
   TutorAwaitMode,
+  TutorCanvasAction,
   TutorCanvasCommand,
   TutorCanvasMode,
   TutorMediaAsset,
@@ -93,6 +94,141 @@ function normalizeChoice(
   };
 }
 
+function cloneCanvasState(canvas: TutorCanvasState): TutorCanvasState {
+  return {
+    ...canvas,
+    tokens: [...canvas.tokens],
+    zones: [...canvas.zones],
+    equation: canvas.equation
+      ? {
+          ...canvas.equation,
+          choices: [...canvas.equation.choices],
+        }
+      : null,
+    fillBlank: canvas.fillBlank
+      ? {
+          ...canvas.fillBlank,
+          slots: canvas.fillBlank.slots.map((slot) => ({ ...slot })),
+        }
+      : null,
+    codeBlock: canvas.codeBlock ? { ...canvas.codeBlock } : null,
+    multipleChoice: canvas.multipleChoice
+      ? {
+          ...canvas.multipleChoice,
+          options: [...canvas.multipleChoice.options],
+          selectedIds: [...canvas.multipleChoice.selectedIds],
+        }
+      : null,
+    numberLine: canvas.numberLine
+      ? {
+          ...canvas.numberLine,
+          labels: canvas.numberLine.labels ? [...canvas.numberLine.labels] : undefined,
+        }
+      : null,
+    tableGrid: canvas.tableGrid
+      ? {
+          ...canvas.tableGrid,
+          headers: [...canvas.tableGrid.headers],
+          cells: canvas.tableGrid.cells.map((cell) => ({ ...cell })),
+        }
+      : null,
+    graphPlot: canvas.graphPlot
+      ? {
+          ...canvas.graphPlot,
+          presetPoints: canvas.graphPlot.presetPoints.map((point) => ({ ...point })),
+          userPoints: canvas.graphPlot.userPoints.map((point) => ({ ...point })),
+          expectedPoints: canvas.graphPlot.expectedPoints
+            ? canvas.graphPlot.expectedPoints.map((point) => ({ ...point }))
+            : undefined,
+        }
+      : null,
+    matchingPairs: canvas.matchingPairs
+      ? {
+          ...canvas.matchingPairs,
+          leftItems: canvas.matchingPairs.leftItems.map((item) => ({ ...item })),
+          rightItems: canvas.matchingPairs.rightItems.map((item) => ({ ...item })),
+          correctPairs: canvas.matchingPairs.correctPairs.map((pair) => ({ ...pair })),
+          userPairs: canvas.matchingPairs.userPairs.map((pair) => ({ ...pair })),
+        }
+      : null,
+    ordering: canvas.ordering
+      ? {
+          ...canvas.ordering,
+          items: canvas.ordering.items.map((item) => ({ ...item })),
+          userOrder: [...canvas.ordering.userOrder],
+        }
+      : null,
+    textResponse: canvas.textResponse ? { ...canvas.textResponse } : null,
+    drawing: canvas.drawing ? { ...canvas.drawing } : null,
+  };
+}
+
+function resolveMediaAssetUrl(args: {
+  mediaAssets?: TutorMediaAsset[];
+  imageId?: string | null;
+  imageIndex?: number | null;
+}): string | undefined {
+  const mediaAssets = args.mediaAssets || [];
+
+  if (typeof args.imageId === 'string' && args.imageId.trim()) {
+    const imageId = args.imageId.trim();
+    return mediaAssets.find((asset) => asset.id === imageId)?.url;
+  }
+
+  if (
+    typeof args.imageIndex === 'number' &&
+    Number.isFinite(args.imageIndex) &&
+    mediaAssets[args.imageIndex]
+  ) {
+    return mediaAssets[args.imageIndex]?.url;
+  }
+
+  return undefined;
+}
+
+function resolveCanvasBackgroundUrl(args: {
+  backgroundImageUrl?: string;
+  mediaAssets?: TutorMediaAsset[];
+  imageId?: string | null;
+  imageIndex?: number | null;
+  defaultImageId?: string | null;
+}) {
+  const rawBackground = asTrimmedString(args.backgroundImageUrl, '');
+  const fromBackgroundAsset = rawBackground
+    ? resolveMediaAssetUrl({
+        mediaAssets: args.mediaAssets,
+        imageId: rawBackground,
+      })
+    : undefined;
+
+  if (rawBackground) {
+    if (
+      /^https?:\/\//i.test(rawBackground) ||
+      rawBackground.startsWith('/') ||
+      rawBackground.startsWith('data:') ||
+      rawBackground.startsWith('blob:')
+    ) {
+      return rawBackground;
+    }
+
+    if (fromBackgroundAsset) {
+      return fromBackgroundAsset;
+    }
+  }
+
+  return (
+    resolveMediaAssetUrl({
+      mediaAssets: args.mediaAssets,
+      imageId: args.imageId,
+      imageIndex: args.imageIndex,
+    }) ||
+    resolveMediaAssetUrl({
+      mediaAssets: args.mediaAssets,
+      imageId: args.defaultImageId,
+    })
+  );
+}
+
 export function createEmptyTutorCanvasState(): TutorCanvasState {
   return {
     mode: 'distribution',
@@ -116,19 +252,18 @@ export function createEmptyTutorCanvasState(): TutorCanvasState {
 
 export function applyTutorCommands(
   baseState: TutorCanvasState,
-  commands: TutorCanvasCommand[]
+  commands: TutorCanvasCommand[],
+  options?: {
+    canvasAction?: TutorCanvasAction;
+    mediaAssets?: TutorMediaAsset[];
+    defaultImageId?: string | null;
+  }
 ): { canvas: TutorCanvasState; sessionComplete: boolean } {
-  const nextState: TutorCanvasState = {
-    ...baseState,
-    tokens: [...baseState.tokens],
-    zones: [...baseState.zones],
-    equation: baseState.equation
-      ? {
-          ...baseState.equation,
-          choices: [...baseState.equation.choices],
-        }
-      : null,
-  };
+  const canvasAction = options?.canvasAction || 'keep';
+  const nextState =
+    canvasAction === 'keep'
+      ? cloneCanvasState(baseState)
+      : createEmptyTutorCanvasState();
   let sessionComplete = false;
 
   for (const command of commands) {
@@ -366,17 +501,30 @@ export function applyTutorCommands(
         nextState.textResponse = null;
         break;
       case 'set_drawing':
+        {
+          const previousSceneRevision =
+            baseState.drawing?.sceneRevision ??
+            nextState.drawing?.sceneRevision ??
+            0;
         nextState.drawing = {
           prompt: asTrimmedString(command.prompt, 'Draw your answer.'),
-          backgroundImageUrl: typeof command.backgroundImageUrl === 'string' ? command.backgroundImageUrl : undefined,
+          backgroundImageUrl: resolveCanvasBackgroundUrl({
+            backgroundImageUrl: command.backgroundImageUrl,
+            mediaAssets: options?.mediaAssets,
+            imageId: command.imageId,
+            imageIndex: command.imageIndex,
+            defaultImageId: options?.defaultImageId,
+          }),
           canvasWidth: typeof command.canvasWidth === 'number' ? command.canvasWidth : 600,
           canvasHeight: typeof command.canvasHeight === 'number' ? command.canvasHeight : 400,
           brushColor: asTrimmedString(command.brushColor, '#000000'),
           brushSize: typeof command.brushSize === 'number' ? command.brushSize : 3,
           submitted: false,
+          sceneRevision: previousSceneRevision + 1,
         };
         nextState.mode = 'drawing';
         break;
+        }
       case 'clear_drawing':
         nextState.drawing = null;
         break;
