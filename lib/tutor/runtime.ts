@@ -5,6 +5,7 @@ import type {
   TutorMediaAsset,
   TutorCanvasState,
   TutorEquationChoice,
+  TutorFillBlankSlot,
   TutorRuntimeSnapshot,
 } from '@/lib/types/tutor';
 
@@ -18,8 +19,15 @@ function asTrimmedString(value: unknown, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
+const VALID_MODES: Set<string> = new Set([
+  'distribution', 'equation', 'fill_blank', 'code_block',
+  'multiple_choice', 'number_line', 'table_grid', 'graph_plot',
+  'matching_pairs', 'ordering', 'text_response', 'drawing',
+]);
+
 function normalizeMode(value: unknown): TutorCanvasMode {
-  return value === 'equation' ? 'equation' : 'distribution';
+  if (typeof value === 'string' && VALID_MODES.has(value)) return value as TutorCanvasMode;
+  return 'distribution';
 }
 
 function normalizeToken(
@@ -93,6 +101,16 @@ export function createEmptyTutorCanvasState(): TutorCanvasState {
     tokens: [],
     zones: [],
     equation: null,
+    fillBlank: null,
+    codeBlock: null,
+    multipleChoice: null,
+    numberLine: null,
+    tableGrid: null,
+    graphPlot: null,
+    matchingPairs: null,
+    ordering: null,
+    textResponse: null,
+    drawing: null,
   };
 }
 
@@ -147,6 +165,221 @@ export function applyTutorCommands(
       case 'clear_equation':
         nextState.equation = null;
         break;
+      case 'set_fill_blank': {
+        const slots: TutorFillBlankSlot[] = Array.isArray(command.slots)
+          ? command.slots
+              .filter((s) => s && typeof s === 'object')
+              .map((s, i) => ({
+                id: asTrimmedString(s.id, nextId('slot', i)),
+                placeholder: asTrimmedString(s.placeholder, `answer ${i + 1}`),
+                correctAnswer: typeof s.correctAnswer === 'string' ? s.correctAnswer : undefined,
+                userAnswer: '',
+              }))
+          : [];
+        nextState.fillBlank = {
+          prompt: asTrimmedString(command.prompt, 'Fill in the blanks.'),
+          beforeText: asTrimmedString(command.beforeText, ''),
+          afterText: asTrimmedString(command.afterText, ''),
+          slots,
+          submitted: false,
+        };
+        nextState.mode = 'fill_blank';
+        break;
+      }
+      case 'clear_fill_blank':
+        nextState.fillBlank = null;
+        break;
+      case 'set_code_block':
+        nextState.codeBlock = {
+          prompt: asTrimmedString(command.prompt, 'Write your code below.'),
+          language: asTrimmedString(command.language, 'python'),
+          starterCode: asTrimmedString(command.starterCode, ''),
+          userCode: asTrimmedString(command.starterCode, ''),
+          expectedOutput: typeof command.expectedOutput === 'string' ? command.expectedOutput : undefined,
+          submitted: false,
+        };
+        nextState.mode = 'code_block';
+        break;
+      case 'clear_code_block':
+        nextState.codeBlock = null;
+        break;
+      case 'set_multiple_choice': {
+        const options = Array.isArray(command.options)
+          ? command.options.map((opt, i) => ({
+              id: nextId('mc', i),
+              label: asTrimmedString(opt.label, `Option ${i + 1}`),
+              isCorrect: opt.isCorrect === true,
+            }))
+          : [];
+        nextState.multipleChoice = {
+          prompt: asTrimmedString(command.prompt, 'Choose the correct answer.'),
+          options,
+          selectedId: null,
+          allowMultiple: command.allowMultiple === true,
+          selectedIds: [],
+          submitted: false,
+        };
+        nextState.mode = 'multiple_choice';
+        break;
+      }
+      case 'clear_multiple_choice':
+        nextState.multipleChoice = null;
+        break;
+      case 'set_number_line': {
+        const min = typeof command.min === 'number' ? command.min : 0;
+        const max = typeof command.max === 'number' ? command.max : 10;
+        nextState.numberLine = {
+          prompt: asTrimmedString(command.prompt, 'Place the value on the number line.'),
+          min,
+          max,
+          step: typeof command.step === 'number' && command.step > 0 ? command.step : 1,
+          correctValue: typeof command.correctValue === 'number' ? command.correctValue : undefined,
+          userValue: null,
+          showTicks: command.showTicks !== false,
+          labels: Array.isArray(command.labels) ? command.labels : undefined,
+          submitted: false,
+        };
+        nextState.mode = 'number_line';
+        break;
+      }
+      case 'clear_number_line':
+        nextState.numberLine = null;
+        break;
+      case 'set_table_grid': {
+        const headers = Array.isArray(command.headers) ? command.headers.map(String) : [];
+        const cols = headers.length || 2;
+        const rows = typeof command.rows === 'number' && command.rows > 0 ? command.rows : 2;
+        const cells = Array.isArray(command.cells)
+          ? command.cells.map((c) => ({
+              row: typeof c.row === 'number' ? c.row : 0,
+              col: typeof c.col === 'number' ? c.col : 0,
+              value: asTrimmedString(c.value, ''),
+              editable: c.editable !== false,
+              correctAnswer: typeof c.correctAnswer === 'string' ? c.correctAnswer : undefined,
+            }))
+          : [];
+        nextState.tableGrid = {
+          prompt: asTrimmedString(command.prompt, 'Complete the table.'),
+          headers,
+          rows,
+          cols,
+          cells,
+          submitted: false,
+        };
+        nextState.mode = 'table_grid';
+        break;
+      }
+      case 'clear_table_grid':
+        nextState.tableGrid = null;
+        break;
+      case 'set_graph_plot': {
+        const presetPoints = Array.isArray(command.presetPoints)
+          ? command.presetPoints.map((p, i) => ({
+              id: nextId('pt', i),
+              x: typeof p.x === 'number' ? p.x : 0,
+              y: typeof p.y === 'number' ? p.y : 0,
+              label: typeof p.label === 'string' ? p.label : undefined,
+              userPlaced: false,
+            }))
+          : [];
+        nextState.graphPlot = {
+          prompt: asTrimmedString(command.prompt, 'Plot the points on the graph.'),
+          xMin: typeof command.xMin === 'number' ? command.xMin : -10,
+          xMax: typeof command.xMax === 'number' ? command.xMax : 10,
+          yMin: typeof command.yMin === 'number' ? command.yMin : -10,
+          yMax: typeof command.yMax === 'number' ? command.yMax : 10,
+          xLabel: asTrimmedString(command.xLabel, 'x'),
+          yLabel: asTrimmedString(command.yLabel, 'y'),
+          gridLines: command.gridLines !== false,
+          presetPoints,
+          userPoints: [],
+          expectedPoints: Array.isArray(command.expectedPoints) ? command.expectedPoints : undefined,
+          submitted: false,
+        };
+        nextState.mode = 'graph_plot';
+        break;
+      }
+      case 'clear_graph_plot':
+        nextState.graphPlot = null;
+        break;
+      case 'set_matching_pairs': {
+        const leftItems = Array.isArray(command.leftItems)
+          ? command.leftItems.map((item, i) => ({ id: nextId('ml', i), label: asTrimmedString(item.label, `Left ${i + 1}`) }))
+          : [];
+        const rightItems = Array.isArray(command.rightItems)
+          ? command.rightItems.map((item, i) => ({ id: nextId('mr', i), label: asTrimmedString(item.label, `Right ${i + 1}`) }))
+          : [];
+        const correctPairs = Array.isArray(command.correctPairs)
+          ? command.correctPairs
+              .filter((p) => typeof p.leftIndex === 'number' && typeof p.rightIndex === 'number')
+              .map((p) => ({
+                leftId: leftItems[p.leftIndex]?.id || '',
+                rightId: rightItems[p.rightIndex]?.id || '',
+              }))
+              .filter((p) => p.leftId && p.rightId)
+          : [];
+        nextState.matchingPairs = {
+          prompt: asTrimmedString(command.prompt, 'Match the items.'),
+          leftItems,
+          rightItems,
+          correctPairs,
+          userPairs: [],
+          submitted: false,
+        };
+        nextState.mode = 'matching_pairs';
+        break;
+      }
+      case 'clear_matching_pairs':
+        nextState.matchingPairs = null;
+        break;
+      case 'set_ordering': {
+        const items = Array.isArray(command.items)
+          ? command.items.map((item, i) => ({
+              id: nextId('ord', i),
+              label: asTrimmedString(item.label, `Item ${i + 1}`),
+              correctPosition: typeof item.correctPosition === 'number' ? item.correctPosition : undefined,
+            }))
+          : [];
+        nextState.ordering = {
+          prompt: asTrimmedString(command.prompt, 'Arrange in the correct order.'),
+          items,
+          userOrder: items.map((item) => item.id),
+          submitted: false,
+        };
+        nextState.mode = 'ordering';
+        break;
+      }
+      case 'clear_ordering':
+        nextState.ordering = null;
+        break;
+      case 'set_text_response':
+        nextState.textResponse = {
+          prompt: asTrimmedString(command.prompt, 'Type your answer.'),
+          placeholder: asTrimmedString(command.placeholder, 'Type here...'),
+          userText: '',
+          maxLength: typeof command.maxLength === 'number' && command.maxLength > 0 ? command.maxLength : undefined,
+          submitted: false,
+        };
+        nextState.mode = 'text_response';
+        break;
+      case 'clear_text_response':
+        nextState.textResponse = null;
+        break;
+      case 'set_drawing':
+        nextState.drawing = {
+          prompt: asTrimmedString(command.prompt, 'Draw your answer.'),
+          backgroundImageUrl: typeof command.backgroundImageUrl === 'string' ? command.backgroundImageUrl : undefined,
+          canvasWidth: typeof command.canvasWidth === 'number' ? command.canvasWidth : 600,
+          canvasHeight: typeof command.canvasHeight === 'number' ? command.canvasHeight : 400,
+          brushColor: asTrimmedString(command.brushColor, '#000000'),
+          brushSize: typeof command.brushSize === 'number' ? command.brushSize : 3,
+          submitted: false,
+        };
+        nextState.mode = 'drawing';
+        break;
+      case 'clear_drawing':
+        nextState.drawing = null;
+        break;
       case 'complete_session':
         sessionComplete = true;
         break;
@@ -164,6 +397,57 @@ export function summarizeTutorCanvas(canvas: TutorCanvasState) {
       (choice) => choice.id === canvas.equation?.selectedChoiceId
     );
     return `Equation board: ${canvas.equation.expression}. Selected answer: ${selected?.label || 'none'}.`;
+  }
+
+  if (canvas.mode === 'fill_blank' && canvas.fillBlank) {
+    const filled = canvas.fillBlank.slots
+      .map((slot) => `${slot.placeholder}: ${slot.userAnswer || '(empty)'}`)
+      .join(', ');
+    return `Fill-in-the-blank: ${canvas.fillBlank.prompt}. Answers: ${filled}. Submitted: ${canvas.fillBlank.submitted}.`;
+  }
+
+  if (canvas.mode === 'code_block' && canvas.codeBlock) {
+    const codePreview = canvas.codeBlock.userCode.slice(0, 200);
+    return `Code editor (${canvas.codeBlock.language}): ${canvas.codeBlock.prompt}. Code: ${codePreview}. Submitted: ${canvas.codeBlock.submitted}.`;
+  }
+
+  if (canvas.mode === 'multiple_choice' && canvas.multipleChoice) {
+    const mc = canvas.multipleChoice;
+    const selected = mc.allowMultiple
+      ? mc.selectedIds.map((id) => mc.options.find((o) => o.id === id)?.label).filter(Boolean).join(', ') || 'none'
+      : mc.options.find((o) => o.id === mc.selectedId)?.label || 'none';
+    return `Multiple choice: ${mc.prompt}. Options: ${mc.options.map((o) => o.label).join(', ')}. Selected: ${selected}. Submitted: ${mc.submitted}.`;
+  }
+
+  if (canvas.mode === 'number_line' && canvas.numberLine) {
+    return `Number line [${canvas.numberLine.min}–${canvas.numberLine.max}]: ${canvas.numberLine.prompt}. User value: ${canvas.numberLine.userValue ?? 'none'}. Submitted: ${canvas.numberLine.submitted}.`;
+  }
+
+  if (canvas.mode === 'table_grid' && canvas.tableGrid) {
+    const editableCells = canvas.tableGrid.cells.filter((c) => c.editable);
+    const filled = editableCells.filter((c) => c.value.trim()).length;
+    return `Table (${canvas.tableGrid.rows}x${canvas.tableGrid.cols}): ${canvas.tableGrid.prompt}. Filled: ${filled}/${editableCells.length}. Submitted: ${canvas.tableGrid.submitted}.`;
+  }
+
+  if (canvas.mode === 'graph_plot' && canvas.graphPlot) {
+    return `Graph [${canvas.graphPlot.xMin},${canvas.graphPlot.xMax}]x[${canvas.graphPlot.yMin},${canvas.graphPlot.yMax}]: ${canvas.graphPlot.prompt}. Preset: ${canvas.graphPlot.presetPoints.length}, User: ${canvas.graphPlot.userPoints.length}. Submitted: ${canvas.graphPlot.submitted}.`;
+  }
+
+  if (canvas.mode === 'matching_pairs' && canvas.matchingPairs) {
+    return `Matching: ${canvas.matchingPairs.prompt}. Pairs made: ${canvas.matchingPairs.userPairs.length}/${canvas.matchingPairs.leftItems.length}. Submitted: ${canvas.matchingPairs.submitted}.`;
+  }
+
+  if (canvas.mode === 'ordering' && canvas.ordering) {
+    return `Ordering: ${canvas.ordering.prompt}. Items: ${canvas.ordering.items.length}. Submitted: ${canvas.ordering.submitted}.`;
+  }
+
+  if (canvas.mode === 'text_response' && canvas.textResponse) {
+    const preview = canvas.textResponse.userText.slice(0, 100);
+    return `Text response: ${canvas.textResponse.prompt}. Answer: ${preview || '(empty)'}. Submitted: ${canvas.textResponse.submitted}.`;
+  }
+
+  if (canvas.mode === 'drawing' && canvas.drawing) {
+    return `Drawing canvas: ${canvas.drawing.prompt}. Submitted: ${canvas.drawing.submitted}.`;
   }
 
   const zoneSummary = canvas.zones
@@ -187,6 +471,39 @@ export function updateTutorCanvasTokenZone(
     tokens: canvas.tokens.map((token) =>
       token.id === tokenId ? { ...token, zoneId } : token
     ),
+  };
+}
+
+export function updateTutorFillBlankAnswer(
+  canvas: TutorCanvasState,
+  slotId: string,
+  answer: string
+): TutorCanvasState {
+  if (!canvas.fillBlank) return canvas;
+
+  return {
+    ...canvas,
+    fillBlank: {
+      ...canvas.fillBlank,
+      slots: canvas.fillBlank.slots.map((slot) =>
+        slot.id === slotId ? { ...slot, userAnswer: answer } : slot
+      ),
+    },
+  };
+}
+
+export function updateTutorCodeBlockCode(
+  canvas: TutorCanvasState,
+  code: string
+): TutorCanvasState {
+  if (!canvas.codeBlock) return canvas;
+
+  return {
+    ...canvas,
+    codeBlock: {
+      ...canvas.codeBlock,
+      userCode: code,
+    },
   };
 }
 

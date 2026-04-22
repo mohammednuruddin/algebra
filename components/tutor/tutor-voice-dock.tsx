@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Mic, MicOff, Square } from 'lucide-react';
+import { Loader2, Mic, MicOff, Square, Keyboard } from 'lucide-react';
 import {
   ASSEMBLY_STREAM_SAMPLE_RATE,
   buildAssemblyAiStreamingQuery,
@@ -9,10 +9,8 @@ import {
   type AssemblyAiTurnMessage,
 } from '@/lib/stt/assemblyai-streaming';
 import { appendPcmChunks } from '@/lib/stt/pcm-chunker';
-import {
-  isMeaningfulTutorTranscript,
-  shouldTriggerTutorBargeIn,
-} from '@/lib/tutor/intake-heuristics';
+import { isMeaningfulTutorTranscript } from '@/lib/tutor/intake-heuristics';
+import { VadEngine } from '@/lib/vad/vad-engine';
 
 interface TutorVoiceDockProps {
   disabled?: boolean;
@@ -21,6 +19,7 @@ interface TutorVoiceDockProps {
   teacherSpeaking?: boolean;
   onTranscript: (text: string) => Promise<void> | void;
   onSpeechStart?: () => void;
+  onTextSubmit?: (text: string) => Promise<void> | void;
 }
 
 const STREAM_QUERY = buildAssemblyAiStreamingQuery();
@@ -101,12 +100,15 @@ export function TutorVoiceDock({
   teacherSpeaking = false,
   onTranscript,
   onSpeechStart,
+  onTextSubmit,
 }: TutorVoiceDockProps) {
   const [micEnabled, setMicEnabled] = useState(true);
   const [streamingState, setStreamingState] = useState<'idle' | 'connecting' | 'listening' | 'processing'>('idle');
   const [voiceLevel, setVoiceLevel] = useState(0);
   const [transcript, setTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [inputMode, setInputMode] = useState<'voice' | 'text'>('voice');
+  const [textInput, setTextInput] = useState('');
 
   const websocketRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -122,9 +124,10 @@ export function TutorVoiceDock({
   const onTranscriptRef = useRef(onTranscript);
   const streamStartIdRef = useRef(0);
   const pendingPcmSamplesRef = useRef<number[]>([]);
-  const bargeInTriggeredRef = useRef(false);
+  const sttSuppressedRef = useRef(false);
+  const vadRef = useRef<VadEngine>(new VadEngine());
 
-  const canAutoListen = micEnabled && !disabled && runtimeStatus === 'ready' && speechToTextEnabled;
+  const canAutoListen = micEnabled && !disabled && runtimeStatus === 'ready' && speechToTextEnabled && inputMode === 'voice';
 
   useEffect(() => {
     canAutoListenRef.current = canAutoListen;
@@ -133,6 +136,38 @@ export function TutorVoiceDock({
   useEffect(() => {
     onTranscriptRef.current = onTranscript;
   }, [onTranscript]);
+
+  // VAD echo suppression: notify VAD when TTS starts/stops
+  useEffect(() => {
+    const vad = vadRef.current;
+    if (teacherSpeaking) {
+      vad.notifyTtsStarted();
+      sttSuppressedRef.current = true;
+    } else {
+      vad.notifyTtsStopped();
+      // Small delay before unsuppressing STT to avoid echo tail
+      const timer = setTimeout(() => {
+        sttSuppressedRef.current = false;
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [teacherSpeaking]);
+
+  // VAD barge-in callback
+  useEffect(() => {
+    const vad = vadRef.current;
+    vad.onSpeechStart = () => {
+      if (teacherSpeaking) {
+        onSpeechStart?.();
+        sttSuppressedRef.current = false;
+      }
+    };
+    vad.onSpeechEnd = null;
+    return () => {
+      vad.onSpeechStart = null;
+      vad.onSpeechEnd = null;
+    };
+  }, [onSpeechStart, teacherSpeaking]);
 
   const clearConnectionTimeout = useCallback(() => {
     const timeoutId = connectionTimeoutRef.current;
@@ -184,7 +219,6 @@ export function TutorVoiceDock({
     }
     mediaStreamRef.current = null;
     pendingPcmSamplesRef.current = [];
-    bargeInTriggeredRef.current = false;
 
     const audioContext = audioContextRef.current;
     audioContextRef.current = null;
@@ -221,6 +255,8 @@ export function TutorVoiceDock({
         // noop
       }
     }
+
+    vadRef.current.reset();
 
     if (mountedRef.current) {
       setStreamingState(nextState);
@@ -325,15 +361,12 @@ export function TutorVoiceDock({
           setVoiceLevel(level);
         }
 
-        if (
-          !bargeInTriggeredRef.current &&
-          shouldTriggerTutorBargeIn({
-            teacherSpeaking,
-            voiceLevel: level,
-          })
-        ) {
-          bargeInTriggeredRef.current = true;
-          onSpeechStart?.();
+        // Feed level to VAD for barge-in detection (always, even during TTS)
+        vadRef.current.feedLevel(level);
+
+        // During TTS or echo cooldown, don't forward audio to STT
+        if (sttSuppressedRef.current) {
+          return;
         }
 
         if (websocket.readyState !== WebSocket.OPEN) {
@@ -362,6 +395,11 @@ export function TutorVoiceDock({
 
       websocket.onmessage = async (event) => {
         if (!mountedRef.current) {
+          return;
+        }
+
+        // Drop transcripts while STT is suppressed (during TTS)
+        if (sttSuppressedRef.current) {
           return;
         }
 
@@ -397,7 +435,7 @@ export function TutorVoiceDock({
           return;
         }
         console.error('WebSocket error:', event);
-        setError('Listening connection failed');
+        setError('Listening connection failed. Tap the mic to retry.');
         setMicEnabled(false);
         void stopStreaming('idle');
       };
@@ -422,7 +460,7 @@ export function TutorVoiceDock({
     } finally {
       restartingRef.current = false;
     }
-  }, [canAutoListen, clearConnectionTimeout, onSpeechStart, stopStreaming, streamingState, teacherSpeaking]);
+  }, [canAutoListen, clearConnectionTimeout, stopStreaming, streamingState]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -435,7 +473,9 @@ export function TutorVoiceDock({
 
   useEffect(() => {
     if (!canAutoListen) {
-      void stopStreaming('idle');
+      if (streamingState !== 'idle') {
+        void stopStreaming('idle');
+      }
       return;
     }
 
@@ -445,32 +485,35 @@ export function TutorVoiceDock({
   }, [canAutoListen, startStreaming, stopStreaming, streamingState]);
 
   const statusText = useMemo(() => {
+    if (inputMode === 'text') {
+      return 'Type your response below';
+    }
     if (error) {
       return error;
     }
     if (!speechToTextEnabled) {
-      return 'Learner voice is unavailable';
+      return 'Voice unavailable — use text input';
     }
     if (runtimeStatus === 'loading') {
       return 'Checking voice services...';
     }
     if (teacherSpeaking) {
-      return 'Tutor speaking...';
+      return 'Tutor speaking — say something to interrupt';
     }
     if (!micEnabled) {
       return 'Mic paused';
     }
     if (streamingState === 'connecting') {
-      return 'Connecting live transcript...';
+      return 'Connecting...';
     }
     if (streamingState === 'processing') {
-      return transcript || 'Sending your turn...';
+      return transcript || 'Sending...';
     }
     if (transcript.trim()) {
       return transcript;
     }
-    return 'Listening live...';
-  }, [error, micEnabled, runtimeStatus, speechToTextEnabled, streamingState, teacherSpeaking, transcript]);
+    return 'Listening...';
+  }, [error, inputMode, micEnabled, runtimeStatus, speechToTextEnabled, streamingState, teacherSpeaking, transcript]);
 
   const bars = [12, 22, 30, 22, 12];
   const listening = streamingState === 'listening';
@@ -487,37 +530,99 @@ export function TutorVoiceDock({
     });
   }, [stopStreaming]);
 
+  const handleTextSubmit = useCallback(async () => {
+    const text = textInput.trim();
+    if (!text) return;
+    setTextInput('');
+    if (onTextSubmit) {
+      await onTextSubmit(text);
+    } else {
+      await onTranscriptRef.current(text);
+    }
+  }, [textInput, onTextSubmit]);
+
+  if (inputMode === 'text') {
+    return (
+      <div className="pointer-events-auto w-full">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setInputMode('voice')}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-500 hover:bg-zinc-200 transition-colors"
+            aria-label="Switch to voice"
+          >
+            <Mic className="h-4 w-4" />
+          </button>
+          <div className="flex-1 flex gap-2">
+            <input
+              type="text"
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void handleTextSubmit();
+                }
+              }}
+              placeholder="Type your answer..."
+              disabled={disabled}
+              className="flex-1 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-zinc-400 disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={() => void handleTextSubmit()}
+              disabled={disabled || !textInput.trim()}
+              className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-40"
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="pointer-events-auto w-full">
       <div className="flex items-center gap-4">
         <button
-            type="button"
-            onClick={handleMicToggle}
-            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-colors ${
-              micEnabled 
-                ? 'bg-zinc-900 text-white hover:bg-zinc-800' 
-                : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
-            }`}
-            aria-label={micEnabled ? 'Pause microphone' : 'Resume microphone'}
-          >
-            {streamingState === 'connecting' || streamingState === 'processing' ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : !micEnabled ? (
-              <MicOff className="h-5 w-5" />
-            ) : listening ? (
-              <Square className="h-4 w-4 fill-current" />
-            ) : (
-              <Mic className="h-5 w-5" />
-            )}
-          </button>
+          type="button"
+          onClick={handleMicToggle}
+          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-colors ${
+            micEnabled
+              ? 'bg-zinc-900 text-white hover:bg-zinc-800'
+              : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
+          }`}
+          aria-label={micEnabled ? 'Pause microphone' : 'Resume microphone'}
+        >
+          {streamingState === 'connecting' || streamingState === 'processing' ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : !micEnabled ? (
+            <MicOff className="h-5 w-5" />
+          ) : listening ? (
+            <Square className="h-4 w-4 fill-current" />
+          ) : (
+            <Mic className="h-5 w-5" />
+          )}
+        </button>
         <div className="min-w-0 flex-1 flex flex-col justify-center">
           <div className="flex items-center justify-between gap-4">
             <p className={`truncate text-sm font-medium ${error ? 'text-rose-600' : 'text-zinc-900'}`}>
               {statusText}
             </p>
-            <span className="text-[10px] font-semibold tracking-widest uppercase text-zinc-400">
-              {listening ? 'Live' : teacherSpeaking ? 'Tutor' : streamingState === 'processing' ? 'Send' : 'Ready'}
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setInputMode('text')}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors"
+                aria-label="Switch to text input"
+              >
+                <Keyboard className="h-3.5 w-3.5" />
+              </button>
+              <span className="text-[10px] font-semibold tracking-widest uppercase text-zinc-400">
+                {listening ? 'Live' : teacherSpeaking ? 'Tutor' : streamingState === 'processing' ? 'Send' : 'Ready'}
+              </span>
+            </div>
           </div>
           <div className="mt-2 flex items-end gap-[3px] h-[30px]">
             {bars.map((bar, index) => (

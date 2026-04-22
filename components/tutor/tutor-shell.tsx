@@ -1,11 +1,13 @@
 'use client';
 
 import type { TutorRuntimeSnapshot } from '@/lib/types/tutor';
+import type { LessonArticleRecord } from '@/lib/types/database';
 
 import { TutorCanvasHost } from '@/components/tutor/tutor-canvas-host';
 import { TutorSpeech } from '@/components/tutor/tutor-speech';
 import { TutorVoiceDock } from '@/components/tutor/tutor-voice-dock';
 import { TutorVoicePlayer } from '@/components/tutor/tutor-voice-player';
+import { SessionSidebar } from '@/components/tutor/session-sidebar';
 
 interface TutorShellProps {
   snapshot: TutorRuntimeSnapshot;
@@ -21,6 +23,11 @@ interface TutorShellProps {
   onTranscript: (text: string) => Promise<void>;
   onMoveToken: (tokenId: string, zoneId: string | null) => void;
   onChooseEquationAnswer: (choiceId: string) => void;
+  onFillBlankSubmit?: (answers: Record<string, string>) => void;
+  onCodeSubmit?: (code: string) => void;
+  onCanvasSubmit?: (mode: string, data: unknown) => void;
+  isGeneratingArticle?: boolean;
+  article?: LessonArticleRecord | null;
   teacherSpeaking: boolean;
   onTeacherSpeakingChange: (value: boolean) => void;
   onTeacherAudioPendingChange?: (value: boolean) => void;
@@ -41,6 +48,11 @@ export function TutorShell({
   onTranscript,
   onMoveToken,
   onChooseEquationAnswer,
+  onFillBlankSubmit,
+  onCodeSubmit,
+  onCanvasSubmit,
+  isGeneratingArticle = false,
+  article,
   teacherSpeaking,
   onTeacherSpeakingChange,
   onTeacherAudioPendingChange,
@@ -52,6 +64,11 @@ export function TutorShell({
 
   return (
     <div className="flex h-[100dvh] w-full overflow-hidden bg-[#FAFAFA] text-zinc-900 font-sans selection:bg-zinc-200 selection:text-zinc-900">
+      <SessionSidebar
+        currentSessionId={snapshot.sessionId}
+        isGeneratingArticle={isGeneratingArticle}
+        article={article}
+      />
       {voiceEnabled ? (
         <TutorVoicePlayer
           enabled={voiceEnabled}
@@ -140,6 +157,9 @@ export function TutorShell({
                 disabled={snapshot.status === 'completed'}
                 onMoveToken={onMoveToken}
                 onChooseEquationAnswer={onChooseEquationAnswer}
+                onFillBlankSubmit={onFillBlankSubmit}
+                onCodeSubmit={onCodeSubmit}
+                onCanvasSubmit={onCanvasSubmit}
               />
            </div>
          ) : null}

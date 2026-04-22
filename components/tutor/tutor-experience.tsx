@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { TutorShell } from '@/components/tutor/tutor-shell';
 import { useTutorSession } from '@/lib/hooks/use-tutor-session';
 
+
 type RuntimeConfig = {
   voiceEnabled: boolean;
   teacherVoiceId: string;
@@ -27,6 +28,8 @@ export function TutorExperience() {
     phase,
     error,
     isSubmittingTurn,
+    isGeneratingArticle,
+    article,
     startSession: startTutorSession,
     submitTranscript: submitTutorTranscript,
     moveToken,
@@ -79,6 +82,30 @@ export function TutorExperience() {
       }
     },
     [submitTutorTranscript]
+  );
+
+  const handleFillBlankSubmit = useCallback(
+    (answers: Record<string, string>) => {
+      const summary = Object.entries(answers)
+        .map(([, value]) => value)
+        .join(', ');
+      void submitTranscript(`[Fill-in-the-blank answers: ${summary}]`);
+    },
+    [submitTranscript]
+  );
+
+  const handleCodeSubmit = useCallback(
+    (code: string) => {
+      void submitTranscript(`[Code submission]\n${code}`);
+    },
+    [submitTranscript]
+  );
+
+  const handleCanvasSubmit = useCallback(
+    (mode: string, data: unknown) => {
+      void submitTranscript(`[Canvas interaction: ${mode}] ${JSON.stringify(data)}`);
+    },
+    [submitTranscript]
   );
 
   useEffect(() => {
@@ -180,6 +207,11 @@ export function TutorExperience() {
       onTranscript={submitTranscript}
       onMoveToken={moveToken}
       onChooseEquationAnswer={chooseEquationAnswer}
+      onFillBlankSubmit={handleFillBlankSubmit}
+      onCodeSubmit={handleCodeSubmit}
+      onCanvasSubmit={handleCanvasSubmit}
+      isGeneratingArticle={isGeneratingArticle}
+      article={article}
       teacherSpeaking={teacherSpeaking}
       onTeacherSpeakingChange={setTeacherSpeaking}
       onTeacherAudioPendingChange={setTeacherAudioPending}

@@ -1,8 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { saveGuestTutorSnapshot } from '@/lib/guest/guest-tutor-store';
+import {
+  saveGuestLesson,
+  createGuestLesson,
+  type GuestLessonRecord,
+} from '@/lib/guest/guest-lesson-store';
 import {
   summarizeTutorCanvas,
   updateTutorCanvasTokenZone,
@@ -14,6 +19,7 @@ import type {
   TutorSessionCreateResponse,
   TutorTurnResponse,
 } from '@/lib/types/tutor';
+import type { LessonArticleRecord } from '@/lib/types/database';
 
 function logTutorDebug(stage: 'session_create' | 'turn', debug?: TutorLlmDebugTrace) {
   if (process.env.NODE_ENV === 'production' || !debug) {
@@ -37,6 +43,10 @@ export function useTutorSession() {
   const [phase, setPhase] = useState<'intake' | 'preparing' | 'live' | 'error'>('intake');
   const [error, setError] = useState<string | null>(null);
   const [isSubmittingTurn, setIsSubmittingTurn] = useState(false);
+  const [isGeneratingArticle, setIsGeneratingArticle] = useState(false);
+  const [article, setArticle] = useState<LessonArticleRecord | null>(null);
+
+  const articleGenRef = useRef(false);
 
   useEffect(() => {
     if (!snapshot) {
@@ -44,7 +54,33 @@ export function useTutorSession() {
     }
 
     saveGuestTutorSnapshot(snapshot);
-  }, [snapshot]);
+
+    if (snapshot.status === 'completed' && !article && !articleGenRef.current) {
+      articleGenRef.current = true;
+      setIsGeneratingArticle(true);
+      fetch('/api/tutor/article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot }),
+      })
+        .then(async (response) => {
+          if (!response.ok) return;
+          const payload = (await response.json()) as { article?: LessonArticleRecord };
+          if (payload.article) {
+            setArticle(payload.article);
+            const lessonRecord: GuestLessonRecord = {
+              ...createGuestLesson(snapshot.lessonTopic),
+              id: snapshot.sessionId,
+              status: 'complete',
+              article: payload.article,
+            };
+            saveGuestLesson(lessonRecord);
+          }
+        })
+        .catch((err) => console.error('Article generation failed:', err))
+        .finally(() => setIsGeneratingArticle(false));
+    }
+  }, [snapshot, article]);
 
   const startSession = useCallback(
     async (
@@ -155,6 +191,8 @@ export function useTutorSession() {
     phase,
     error,
     isSubmittingTurn,
+    isGeneratingArticle,
+    article,
     startSession,
     submitTranscript,
     moveToken,

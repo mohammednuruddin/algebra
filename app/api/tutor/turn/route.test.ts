@@ -54,6 +54,16 @@ const emptyCanvas: TutorCanvasState = {
   tokens: [],
   zones: [],
   equation: null,
+  fillBlank: null,
+  codeBlock: null,
+  multipleChoice: null,
+  numberLine: null,
+  tableGrid: null,
+  graphPlot: null,
+  matchingPairs: null,
+  ordering: null,
+  textResponse: null,
+  drawing: null,
 };
 
 function buildSnapshot(
