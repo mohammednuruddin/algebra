@@ -144,8 +144,8 @@ function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
       case 'set_mode': {
         commands.push({
           type: 'set_mode',
-          mode: command.mode === 'equation' ? 'equation' : 'distribution',
-        });
+          mode: trimmed(command.mode, 'distribution'),
+        } as TutorCanvasCommand);
         break;
       }
       case 'set_headline': {
@@ -239,6 +239,194 @@ function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
       }
       case 'complete_session': {
         commands.push({ type: 'complete_session' });
+        break;
+      }
+      case 'show_image': {
+        commands.push({
+          type: 'show_image',
+          ...(typeof command.imageId === 'string' ? { imageId: command.imageId } : {}),
+          ...(typeof command.imageIndex === 'number' ? { imageIndex: command.imageIndex } : {}),
+        });
+        break;
+      }
+      case 'clear_image': {
+        commands.push({ type: 'clear_image' });
+        break;
+      }
+      case 'set_fill_blank': {
+        commands.push({
+          type: 'set_fill_blank',
+          prompt: trimmed(command.prompt, 'Fill in the blanks.'),
+          beforeText: trimmed(command.beforeText, ''),
+          afterText: trimmed(command.afterText, ''),
+          slots: Array.isArray(command.slots)
+            ? command.slots
+                .filter((s: unknown) => s && typeof s === 'object')
+                .map((s: Record<string, unknown>) => ({
+                  placeholder: trimmed(s.placeholder, 'answer'),
+                  ...(typeof s.id === 'string' ? { id: s.id } : {}),
+                  ...(typeof s.correctAnswer === 'string' ? { correctAnswer: s.correctAnswer } : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_fill_blank': {
+        commands.push({ type: 'clear_fill_blank' });
+        break;
+      }
+      case 'set_code_block': {
+        commands.push({
+          type: 'set_code_block',
+          prompt: trimmed(command.prompt, 'Write your code below.'),
+          language: trimmed(command.language, 'python'),
+          starterCode: trimmed(command.starterCode, ''),
+          ...(typeof command.expectedOutput === 'string' ? { expectedOutput: command.expectedOutput } : {}),
+        });
+        break;
+      }
+      case 'clear_code_block': {
+        commands.push({ type: 'clear_code_block' });
+        break;
+      }
+      case 'set_multiple_choice': {
+        const opts = Array.isArray(command.options)
+          ? command.options
+              .filter((o: unknown) => o && typeof o === 'object')
+              .map((o: Record<string, unknown>) => ({
+                label: trimmed(o.label, 'Option'),
+                ...(o.isCorrect === true ? { isCorrect: true } : {}),
+              }))
+          : [];
+        commands.push({
+          type: 'set_multiple_choice',
+          prompt: trimmed(command.prompt, 'Choose the correct answer.'),
+          options: opts,
+          ...(command.allowMultiple === true ? { allowMultiple: true } : {}),
+        });
+        break;
+      }
+      case 'clear_multiple_choice': {
+        commands.push({ type: 'clear_multiple_choice' });
+        break;
+      }
+      case 'set_number_line': {
+        commands.push({
+          type: 'set_number_line',
+          prompt: trimmed(command.prompt, 'Place the value on the number line.'),
+          min: typeof command.min === 'number' ? command.min : 0,
+          max: typeof command.max === 'number' ? command.max : 10,
+          ...(typeof command.step === 'number' ? { step: command.step } : {}),
+          ...(typeof command.correctValue === 'number' ? { correctValue: command.correctValue } : {}),
+          ...(typeof command.showTicks === 'boolean' ? { showTicks: command.showTicks } : {}),
+          ...(Array.isArray(command.labels) ? { labels: command.labels } : {}),
+        });
+        break;
+      }
+      case 'clear_number_line': {
+        commands.push({ type: 'clear_number_line' });
+        break;
+      }
+      case 'set_table_grid': {
+        commands.push({
+          type: 'set_table_grid',
+          prompt: trimmed(command.prompt, 'Complete the table.'),
+          headers: Array.isArray(command.headers) ? command.headers.map(String) : [],
+          rows: typeof command.rows === 'number' && command.rows > 0 ? command.rows : 2,
+          ...(Array.isArray(command.cells) ? { cells: command.cells } : {}),
+        });
+        break;
+      }
+      case 'clear_table_grid': {
+        commands.push({ type: 'clear_table_grid' });
+        break;
+      }
+      case 'set_graph_plot': {
+        commands.push({
+          type: 'set_graph_plot',
+          prompt: trimmed(command.prompt, 'Plot the points on the graph.'),
+          ...(typeof command.xMin === 'number' ? { xMin: command.xMin } : {}),
+          ...(typeof command.xMax === 'number' ? { xMax: command.xMax } : {}),
+          ...(typeof command.yMin === 'number' ? { yMin: command.yMin } : {}),
+          ...(typeof command.yMax === 'number' ? { yMax: command.yMax } : {}),
+          ...(typeof command.xLabel === 'string' ? { xLabel: command.xLabel } : {}),
+          ...(typeof command.yLabel === 'string' ? { yLabel: command.yLabel } : {}),
+          ...(typeof command.gridLines === 'boolean' ? { gridLines: command.gridLines } : {}),
+          ...(Array.isArray(command.presetPoints) ? { presetPoints: command.presetPoints } : {}),
+          ...(Array.isArray(command.expectedPoints) ? { expectedPoints: command.expectedPoints } : {}),
+        });
+        break;
+      }
+      case 'clear_graph_plot': {
+        commands.push({ type: 'clear_graph_plot' });
+        break;
+      }
+      case 'set_matching_pairs': {
+        commands.push({
+          type: 'set_matching_pairs',
+          prompt: trimmed(command.prompt, 'Match the items.'),
+          leftItems: Array.isArray(command.leftItems)
+            ? command.leftItems.filter((i: unknown) => i && typeof i === 'object').map((i: Record<string, unknown>) => ({ label: trimmed(i.label, 'Item') }))
+            : [],
+          rightItems: Array.isArray(command.rightItems)
+            ? command.rightItems.filter((i: unknown) => i && typeof i === 'object').map((i: Record<string, unknown>) => ({ label: trimmed(i.label, 'Item') }))
+            : [],
+          correctPairs: Array.isArray(command.correctPairs)
+            ? command.correctPairs.filter((p: unknown) => p && typeof p === 'object' && typeof (p as Record<string, unknown>).leftIndex === 'number' && typeof (p as Record<string, unknown>).rightIndex === 'number')
+            : [],
+        });
+        break;
+      }
+      case 'clear_matching_pairs': {
+        commands.push({ type: 'clear_matching_pairs' });
+        break;
+      }
+      case 'set_ordering': {
+        commands.push({
+          type: 'set_ordering',
+          prompt: trimmed(command.prompt, 'Arrange in the correct order.'),
+          items: Array.isArray(command.items)
+            ? command.items
+                .filter((i: unknown) => i && typeof i === 'object')
+                .map((i: Record<string, unknown>) => ({
+                  label: trimmed(i.label, 'Item'),
+                  ...(typeof i.correctPosition === 'number' ? { correctPosition: i.correctPosition } : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_ordering': {
+        commands.push({ type: 'clear_ordering' });
+        break;
+      }
+      case 'set_text_response': {
+        commands.push({
+          type: 'set_text_response',
+          prompt: trimmed(command.prompt, 'Type your answer.'),
+          ...(typeof command.placeholder === 'string' ? { placeholder: command.placeholder } : {}),
+          ...(typeof command.maxLength === 'number' ? { maxLength: command.maxLength } : {}),
+        });
+        break;
+      }
+      case 'clear_text_response': {
+        commands.push({ type: 'clear_text_response' });
+        break;
+      }
+      case 'set_drawing': {
+        commands.push({
+          type: 'set_drawing',
+          prompt: trimmed(command.prompt, 'Draw your answer.'),
+          ...(typeof command.backgroundImageUrl === 'string' ? { backgroundImageUrl: command.backgroundImageUrl } : {}),
+          ...(typeof command.canvasWidth === 'number' ? { canvasWidth: command.canvasWidth } : {}),
+          ...(typeof command.canvasHeight === 'number' ? { canvasHeight: command.canvasHeight } : {}),
+          ...(typeof command.brushColor === 'string' ? { brushColor: command.brushColor } : {}),
+          ...(typeof command.brushSize === 'number' ? { brushSize: command.brushSize } : {}),
+        });
+        break;
+      }
+      case 'clear_drawing': {
+        commands.push({ type: 'clear_drawing' });
         break;
       }
       default:
@@ -775,7 +963,7 @@ export async function generateInitialTutorResponse(input: {
     {
       role: 'system',
       content:
-        'You are a live speech-first tutor. Return strict JSON with keys speech, awaitMode, sessionComplete, commands. awaitMode: voice or voice_or_canvas. CRITICAL RULE: speech must be 1-2 sentences max. Never lecture. Say one thing, then ask or prompt the learner. This is turn-by-turn conversation. Every command uses key "type". Allowed commands: set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, complete_session. Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl, canvasWidth, canvasHeight, brushColor, brushSize). Use the most appropriate canvas mode for each teaching moment. Keep speech short.',
+        'You are a live speech-first tutor. Return strict JSON with keys speech, awaitMode, sessionComplete, commands. awaitMode: voice or voice_or_canvas. TEACHING RULES: (1) Actually TEACH — explain a concept, give a fact, describe what is happening, or build on what the learner said. Do not just ask questions back-to-back. (2) Keep speech to 2-3 sentences: one sentence teaching, one engaging the learner. (3) Never leave dead air — always pair speech with a visual (show_image) or interactive activity (canvas command) so the learner has something to see and do. (4) Show images early and often when available — they make the lesson come alive. (5) Use canvas modes to make learning hands-on, not passive. This is turn-by-turn dialogue, not a lecture — but each turn must TEACH something new. Every command uses key "type". Allowed commands: set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, complete_session. Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl, canvasWidth, canvasHeight, brushColor, brushSize). Use the most appropriate canvas mode for each teaching moment.',
     },
     {
       role: 'user',
@@ -830,7 +1018,7 @@ export async function generateTutorTurn(args: {
     {
       role: 'system',
       content:
-        'You are a live tutor in a speech-and-canvas product. Return strict JSON with keys speech, awaitMode, sessionComplete, commands. awaitMode: voice or voice_or_canvas. CRITICAL RULE: speech must be 1-2 sentences max. Say one thing, ask one question, then stop. No lectures. This is rapid turn-by-turn dialogue. Every command uses key "type". Allowed commands: set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, complete_session. Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl, canvasWidth, canvasHeight, brushColor, brushSize). Use the best canvas mode for each teaching moment. Keep speech minimal.'
+        'You are a live tutor in a speech-and-canvas product. Return strict JSON with keys speech, awaitMode, sessionComplete, commands. awaitMode: voice or voice_or_canvas. TEACHING RULES: (1) TEACH first — explain a concept, state a fact, describe what the learner is seeing, or connect to what they just said. Do not just ask questions without teaching. (2) Keep speech to 2-3 concise sentences: teach something, then prompt the learner to respond or interact. (3) Never leave dead air — always give the learner something to look at (show_image) or do (canvas interaction). If an image is available and relevant, show it. (4) Use canvas modes actively — set up activities the learner can interact with (multiple_choice, fill_blank, matching_pairs, etc.) so learning is hands-on. (5) When the learner answers, give immediate feedback: say whether they are right, explain why, then move forward. (6) Progress through the lesson outline — do not get stuck repeating the same question. Every command uses key "type". Allowed commands: set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, complete_session. Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl, canvasWidth, canvasHeight, brushColor, brushSize). Use the best canvas mode for each teaching moment.'
     },
     {
       role: 'user',
