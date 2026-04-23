@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { queueTutorGeneratedImages } from '@/lib/media/generated-image-bootstrap';
+import { listCompletedTutorImageAssets } from '@/lib/media/generated-image-jobs';
 import { searchLessonImages } from '@/lib/media/lesson-image-search';
+import { createAdminClient } from '@/lib/supabase/admin';
 import {
   generateInitialTutorResponse,
   generateLessonPreparation,
@@ -25,9 +27,29 @@ import {
 import type {
   TutorCanvasEvidence,
   TutorCanvasInteraction,
+  TutorMediaAsset,
   TutorRuntimeSnapshot,
   TutorTurnResponse,
 } from '@/lib/types/tutor';
+
+function mergeMediaAssets(
+  existingAssets: TutorMediaAsset[],
+  generatedAssets: TutorMediaAsset[]
+) {
+  const seen = new Set(existingAssets.map((asset) => asset.id));
+
+  return [
+    ...existingAssets,
+    ...generatedAssets.filter((asset) => {
+      if (seen.has(asset.id)) {
+        return false;
+      }
+
+      seen.add(asset.id);
+      return true;
+    }),
+  ];
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -254,11 +276,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const hydratedMediaAssets = mergeMediaAssets(
+      snapshot.mediaAssets,
+      await listCompletedTutorImageAssets(createAdminClient(), snapshot.sessionId)
+    );
+
     const modelResult = await generateTutorTurn({
       topic: snapshot.lessonTopic,
       learnerLevel: snapshot.learnerLevel,
       outline: snapshot.lessonOutline,
-      imageAssets: snapshot.mediaAssets,
+      imageAssets: hydratedMediaAssets,
       activeImageId: snapshot.activeImageId,
       continuationContext: snapshot.continuation,
       transcript,
@@ -314,7 +341,7 @@ export async function POST(request: NextRequest) {
       lessonOutline: snapshot.lessonOutline,
       speech: modelResult.response.speech,
       awaitMode: modelResult.response.awaitMode,
-      mediaAssets: snapshot.mediaAssets,
+      mediaAssets: hydratedMediaAssets,
       activeImageId,
       canvas: applied.canvas,
       turns,

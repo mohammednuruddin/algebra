@@ -11,6 +11,8 @@ const {
   mockGenerateTutorTurn,
   mockSearchLessonImages,
   mockQueueTutorGeneratedImages,
+  mockCreateAdminClient,
+  mockListCompletedTutorImageAssets,
   mockApplyTutorCommands,
   mockApplyTutorMediaCommands,
   mockCreateEmptyTutorCanvasState,
@@ -23,6 +25,8 @@ const {
   mockGenerateTutorTurn: vi.fn(),
   mockSearchLessonImages: vi.fn(),
   mockQueueTutorGeneratedImages: vi.fn(),
+  mockCreateAdminClient: vi.fn(),
+  mockListCompletedTutorImageAssets: vi.fn(),
   mockApplyTutorCommands: vi.fn(),
   mockApplyTutorMediaCommands: vi.fn(),
   mockCreateEmptyTutorCanvasState: vi.fn(),
@@ -43,6 +47,14 @@ vi.mock('@/lib/media/lesson-image-search', () => ({
 
 vi.mock('@/lib/media/generated-image-bootstrap', () => ({
   queueTutorGeneratedImages: mockQueueTutorGeneratedImages,
+}));
+
+vi.mock('@/lib/supabase/admin', () => ({
+  createAdminClient: mockCreateAdminClient,
+}));
+
+vi.mock('@/lib/media/generated-image-jobs', () => ({
+  listCompletedTutorImageAssets: mockListCompletedTutorImageAssets,
 }));
 
 vi.mock('@/lib/tutor/runtime', () => ({
@@ -98,6 +110,8 @@ describe('POST /api/tutor/turn', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQueueTutorGeneratedImages.mockResolvedValue([]);
+    mockCreateAdminClient.mockReturnValue({});
+    mockListCompletedTutorImageAssets.mockResolvedValue([]);
     mockCreateEmptyTutorCanvasState.mockReturnValue(emptyCanvas);
     mockCreateTutorSnapshot.mockImplementation(buildSnapshot);
     mockApplyTutorCommands.mockReturnValue({ canvas: emptyCanvas, sessionComplete: false });
@@ -417,6 +431,89 @@ describe('POST /api/tutor/turn', () => {
     expect(mockGenerateTutorTurn).toHaveBeenCalledTimes(1);
     expect(data.snapshot.status).toBe('completed');
     expect(data.snapshot.speech).toBe('Nice work. We can stop here for today.');
+  });
+
+  it('hydrates completed generated assets into live turns before calling the tutor model', async () => {
+    mockListCompletedTutorImageAssets.mockResolvedValue([
+      {
+        id: 'generated_job_1',
+        url: 'https://example.com/generated.webp',
+        altText: 'Plant cell quiz variant',
+        description: 'Same diagram with one label removed.',
+        metadata: {
+          assetKind: 'generated',
+          generationKind: 'edit',
+          variantKind: 'quiz_unlabeled',
+        },
+      },
+    ]);
+    mockGenerateTutorTurn.mockResolvedValue({
+      response: {
+        speech: 'Take a look at the quiz variant now.',
+        awaitMode: 'voice_or_canvas',
+        commands: [],
+        sessionComplete: false,
+        status: 'active',
+        canvasAction: 'keep',
+      },
+      debug: {
+        stage: 'turn',
+        messages: [],
+        rawResponseText: null,
+        rawModelContent: null,
+        parsedResponse: null,
+        usedFallback: false,
+        fallbackReason: null,
+      },
+    });
+
+    const request = new NextRequest('http://localhost:3000/api/tutor/turn', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: buildSnapshot({
+          sessionId: 'tutor_4',
+          prompt: 'pollination',
+          lessonTopic: 'pollination',
+          learnerLevel: 'beginner',
+          lessonOutline: ['Use one image.'],
+          speech: 'Look at the flower diagram.',
+          canvas: emptyCanvas,
+          mediaAssets: [
+            {
+              id: 'img-1',
+              url: 'https://example.com/flower.png',
+              altText: 'Flower diagram',
+              description: 'Flower diagram',
+            },
+          ],
+          intake: null,
+        }),
+        transcript: 'Okay.',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const response = await POST(request);
+    const data = (await response.json()) as { snapshot: TutorRuntimeSnapshot };
+
+    expect(response.status).toBe(200);
+    expect(mockListCompletedTutorImageAssets).toHaveBeenCalledWith({}, 'tutor_4');
+    expect(mockGenerateTutorTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageAssets: expect.arrayContaining([
+          expect.objectContaining({ id: 'img-1' }),
+          expect.objectContaining({ id: 'generated_job_1' }),
+        ]),
+      })
+    );
+    expect(data.snapshot.mediaAssets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'img-1' }),
+        expect.objectContaining({ id: 'generated_job_1' }),
+      ])
+    );
   });
 
   it('forwards canvas evidence and logs the learner transcript on live turns', async () => {
