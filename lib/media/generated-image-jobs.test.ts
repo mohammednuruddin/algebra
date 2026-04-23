@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { TutorMediaAsset } from '@/lib/types/tutor';
+import type { CreateTutorImageGenerationJobInput } from './generated-image-jobs';
 
 import {
   claimTutorImageGenerationJobForProcessing,
@@ -47,9 +48,14 @@ function createSupabaseMock<TRecord extends Record<string, unknown> = Record<str
       select: updateSelect,
     }),
   });
-  const updateAfterEq = {} as any;
-  updateAfterEq.eq = vi.fn().mockReturnValue(updateAfterEq);
-  updateAfterEq.in = updateIn;
+  const updateAfterEq: {
+    eq: ReturnType<typeof vi.fn>;
+    in: typeof updateIn;
+  } = {
+    eq: vi.fn(),
+    in: updateIn,
+  };
+  updateAfterEq.eq.mockReturnValue(updateAfterEq);
   const updateEq = vi.fn().mockImplementation(() => updateAfterEq);
   const update = vi.fn().mockReturnValue({
     eq: updateEq,
@@ -198,7 +204,7 @@ describe('generated-image-jobs', () => {
         prompt: 'Remove the labels from this diagram',
         sourceImageId: 'generated_1',
         requestedEditsJson: { remove: ['nucleus'] },
-      } as any)
+      } as unknown as CreateTutorImageGenerationJobInput)
     ).rejects.toThrow('sourceImageId and sourceImageUrl are required for edit tutor image jobs');
 
     expect(supabase.insert).not.toHaveBeenCalled();
@@ -216,7 +222,7 @@ describe('generated-image-jobs', () => {
         prompt: 'Remove the labels from this diagram',
         sourceImageId: 'generated_1',
         sourceImageUrl: 'https://example.com/original.png',
-      } as any)
+      } as unknown as CreateTutorImageGenerationJobInput)
     ).rejects.toThrow(
       'requestedEditsJson must include non-empty remove and swap entries for edit tutor image jobs'
     );
@@ -374,12 +380,17 @@ describe('generated-image-jobs', () => {
       maybeSingle: updateMaybeSingle,
       single: vi.fn(),
     });
-    const updateAfterEq = {} as any;
     const updateIn = vi.fn().mockReturnValue({
       select: updateSelect,
     });
-    updateAfterEq.eq = vi.fn().mockReturnValue(updateAfterEq);
-    updateAfterEq.in = updateIn;
+    const updateAfterEq: {
+      eq: ReturnType<typeof vi.fn>;
+      in: typeof updateIn;
+    } = {
+      eq: vi.fn(),
+      in: updateIn,
+    };
+    updateAfterEq.eq.mockReturnValue(updateAfterEq);
     const updateEq = vi.fn().mockImplementation(() => updateAfterEq);
     const update = vi.fn().mockReturnValue({
       eq: updateEq,
@@ -421,7 +432,7 @@ describe('generated-image-jobs', () => {
         requestedEditsJson: {
           remove: ['nucleus', 42],
           swap: [{ from: 'evaporation', to: 'condensation' }],
-        } as any,
+        } as unknown as Record<string, unknown>,
       })
     ).rejects.toThrow(
       'requestedEditsJson must include non-empty remove and swap entries for edit tutor image jobs'
@@ -445,7 +456,7 @@ describe('generated-image-jobs', () => {
         requestedEditsJson: {
           remove: [],
           swap: [],
-        } as any,
+        } as Record<string, unknown>,
       })
     ).rejects.toThrow(
       'requestedEditsJson must include non-empty remove and swap entries for edit tutor image jobs'
@@ -498,7 +509,7 @@ describe('generated-image-jobs', () => {
     );
     expect(supabase.updateEq).toHaveBeenCalledWith('prediction_id', 'pred_123');
     expect(supabase.updateIn).toHaveBeenCalledWith('status', ['processing']);
-    expect((completed as any)?.status).toBe('completed');
+    expect(completed?.status).toBe('completed');
   });
 
   it('marks a tutor image generation job failed with the error message', async () => {
@@ -528,7 +539,7 @@ describe('generated-image-jobs', () => {
     );
     expect(supabase.updateEq).toHaveBeenCalledWith('prediction_id', 'pred_123');
     expect(supabase.updateIn).toHaveBeenCalledWith('status', ['processing']);
-    expect((failed as any)?.status).toBe('failed');
+    expect(failed?.status).toBe('failed');
   });
 
   it('does not rewrite a job that is already completed', async () => {
@@ -563,7 +574,7 @@ describe('generated-image-jobs', () => {
     expect(supabase.updateIn).toHaveBeenCalledWith('status', ['processing']);
     expect(supabase.select).toHaveBeenCalled();
     expect(completed?.id).toBe('job_1');
-    expect((completed as any)?.status).toBe('completed');
+    expect(completed?.status).toBe('completed');
   });
 
   it('maps completed jobs back into tutor media assets', async () => {

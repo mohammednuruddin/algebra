@@ -20,6 +20,19 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Live Tutor Media
+
+Background tutor image generation and quiz-variant editing use Replicate webhooks plus Supabase storage.
+
+Required env vars:
+
+- `REPLICATE_API_TOKEN`
+- `REPLICATE_WEBHOOK_SECRET`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_SUPABASE_URL`
+
+Implementation notes live in [docs/2026-04-23-live-tutor-image-generation.md](/Users/nuru/sanchrobytes/algebra/docs/2026-04-23-live-tutor-image-generation.md).
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
