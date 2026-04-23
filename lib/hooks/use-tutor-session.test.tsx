@@ -209,6 +209,14 @@ describe('useTutorSession', () => {
     const completedSnapshot = buildSnapshot({
       status: 'completed',
       speechRevision: 2,
+      mediaAssets: [
+        {
+          id: 'img-1',
+          url: 'https://example.com/python.png',
+          altText: 'Python lesson visual',
+          description: 'Python diagram',
+        },
+      ],
       turns: [
         {
           actor: 'user',
@@ -290,5 +298,20 @@ describe('useTutorSession', () => {
     });
 
     expect(saveGuestLessonMock).toHaveBeenCalledTimes(3);
+    expect(saveGuestLessonMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: completedSnapshot.sessionId,
+        status: 'complete',
+        mediaAssets: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'img-1',
+            type: 'image',
+            url: 'https://example.com/python.png',
+            altText: 'Python lesson visual',
+            description: 'Python diagram',
+          }),
+        ]),
+      })
+    );
   });
 });

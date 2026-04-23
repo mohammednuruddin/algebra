@@ -8,6 +8,7 @@ import {
   createGuestLesson,
   type GuestLessonRecord,
 } from '@/lib/guest/guest-lesson-store';
+import type { MediaAsset } from '@/lib/types/lesson';
 import {
   summarizeTutorCanvas,
   updateTutorCanvasTokenZone,
@@ -63,6 +64,22 @@ function isRetryableGuestLessonWriteError(error: unknown) {
   );
 }
 
+function toGuestLessonMediaAssets(snapshot: TutorRuntimeSnapshot): MediaAsset[] {
+  return snapshot.mediaAssets.map((asset) => ({
+    id: asset.id,
+    type: 'image',
+    url: asset.url,
+    storagePath: asset.url,
+    thumbnailUrl: asset.thumbnailUrl,
+    description: asset.description,
+    altText: asset.altText,
+    source: asset.source,
+    domain: asset.domain,
+    metadata: asset.metadata,
+    relatedMilestones: [],
+  }));
+}
+
 export function useTutorSession() {
   const [snapshot, setSnapshot] = useState<TutorRuntimeSnapshot | null>(null);
   const [phase, setPhase] = useState<'intake' | 'preparing' | 'live' | 'error'>('intake');
@@ -104,6 +121,8 @@ export function useTutorSession() {
               ...createGuestLesson(snapshot.lessonTopic),
               id: snapshot.sessionId,
               status: 'complete',
+              mediaAssets: toGuestLessonMediaAssets(snapshot),
+              activeImageId: snapshot.activeImageId,
               article: payload.article,
             };
             await retryAsync(

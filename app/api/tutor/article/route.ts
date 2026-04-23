@@ -126,7 +126,7 @@ async function generateArticleContent(
     {
       role: 'system' as const,
       content:
-        'You generate lesson articles from tutoring session transcripts. Return strict JSON with keys: title (string), article_markdown (string). The article_markdown must be real, polished Markdown meant to be rendered in a markdown viewer. Make it a study guide, not a transcript. Required structure: start with a single # title, then include sections such as ## Overview, ## Key Ideas, ## Worked Example or ## What We Practiced, ## Common Mistakes or ## Checks for Understanding, and ## Recap or ## Practice Prompts when relevant. Use bullet lists, numbered steps, tables, and fenced code blocks with language tags when they help. Use LaTeX math with $...$ inline and $$...$$ display. Include image references using ![description](url) syntax where relevant images were shown. Do not output raw JSON inside article_markdown, do not write conversational filler, and do not leave it as plain prose paragraphs only.',
+        'You generate lesson articles from tutoring session transcripts. MAKE SURE ITS FUN TO READ. Return strict JSON with keys: title (string), article_markdown (string). The article_markdown must be real, polished Markdown meant to be rendered in a markdown viewer.. Make it a study guide, not a transcript. Required structure: start with a single # title, then include sections such as ## Overview, ## Key Ideas, ## Worked Example or ## What We Practiced, ## Common Mistakes or ## Checks for Understanding, and ## Recap or ## Practice Promts when relevant. Use bullet lists, numbered steps, tables, and fenced code blocks with language tags when they help. Use LaTeX math with $...$ inline and $$...$$ display. Include image references using ![description](url) syntax where relevant images were shown. Do not output raw JSON inside article_markdown, do not write conversational filler, and do not leave it as plain prose paragraphs only.',
     },
     {
       role: 'user' as const,
@@ -138,6 +138,7 @@ async function generateArticleContent(
     messages,
     response_format: { type: 'json_object' },
     temperature: 0.7,
+    max_tokens: 8000,
   });
 
   const response = await fetch(outbound.url, {
@@ -164,9 +165,23 @@ async function generateArticleContent(
   }
 
   const payload = parseJson(text) as {
-    choices?: Array<{ message?: { content?: string } }>;
+    choices?: Array<{ message?: { content?: string }; finish_reason?: string | null }>;
   };
   const content = payload?.choices?.[0]?.message?.content;
+  const finishReason = payload?.choices?.[0]?.finish_reason;
+  if (finishReason === 'length') {
+    throw buildArticleAttemptError(
+      'Article generation was truncated by max_tokens',
+      buildArticleAttemptDebug(attempt, messages, {
+        responseStatus,
+        rawResponseText: text,
+        rawModelContent: content ?? null,
+        parsedResponse: payload,
+      }),
+      true
+    );
+  }
+
   if (!content) {
     throw buildArticleAttemptError(
       'Article generation returned no content',
@@ -251,6 +266,7 @@ export async function POST(request: NextRequest) {
         learnerLevel: snapshot.learnerLevel,
         turnCount: snapshot.turns.length,
         imageCount: snapshot.mediaAssets.length,
+        first_image_url: snapshot.mediaAssets[0]?.url,
       },
       created_at: now,
       updated_at: now,

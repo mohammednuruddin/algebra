@@ -49,6 +49,11 @@ export type GuestHistoryItem = {
   } | null;
 };
 
+function extractFirstMarkdownImage(markdown: string) {
+  const match = markdown.match(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/);
+  return match?.[1] ?? null;
+}
+
 function readLessons() {
   return readJson<GuestLessonRecord[]>(GUEST_LESSONS_KEY, []);
 }
@@ -136,7 +141,10 @@ export function listGuestHistoryItems(): GuestHistoryItem[] {
     .filter((lesson) => lesson.article)
     .map((lesson) => {
       const metadata = (lesson.article!.metadata_json as GuestHistoryItem['metadata_json']) ?? {};
-      const firstImageUrl = metadata.first_image_url || lesson.mediaAssets?.[0]?.url;
+      const firstImageUrl =
+        metadata.first_image_url ||
+        lesson.mediaAssets?.[0]?.url ||
+        extractFirstMarkdownImage(lesson.article!.article_markdown);
 
       return {
         id: lesson.article!.id,
@@ -144,7 +152,7 @@ export function listGuestHistoryItems(): GuestHistoryItem[] {
         created_at: lesson.article!.created_at,
         metadata_json: {
           ...metadata,
-          first_image_url: firstImageUrl,
+          first_image_url: firstImageUrl ?? undefined,
         },
       };
     });

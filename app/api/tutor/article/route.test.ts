@@ -119,6 +119,56 @@ describe('POST /api/tutor/article', () => {
     expect(systemPrompt).toMatch(/study reference|study guide/i);
     expect(systemPrompt).toMatch(/overview/i);
     expect(systemPrompt).toMatch(/key ideas|worked example|recap|practice/i);
+    expect(outbound?.max_tokens).toBe(8000);
+  });
+
+  it('stores the first lesson image in article metadata', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  title: 'Pollination',
+                  article_markdown: '# Pollination\n\n## Overview\n\nStudy notes.',
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    const request = new NextRequest('http://localhost:3000/api/tutor/article', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: buildSnapshot(),
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as {
+      article?: {
+        metadata_json?: {
+          first_image_url?: string;
+        };
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.article?.metadata_json?.first_image_url).toBe(
+      'https://example.com/flower.png'
+    );
   });
 
   it('retries malformed article generations up to a successful third attempt', async () => {
