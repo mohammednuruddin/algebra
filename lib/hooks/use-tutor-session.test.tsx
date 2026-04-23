@@ -314,4 +314,102 @@ describe('useTutorSession', () => {
       })
     );
   });
+
+  it('persists hidden continuation context returned with the generated article', async () => {
+    const initialSnapshot = buildSnapshot();
+    const completedSnapshot = buildSnapshot({
+      status: 'completed',
+      speechRevision: 2,
+      turns: [
+        {
+          actor: 'user',
+          text: 'I still mix up anther and stigma',
+          createdAt: '2026-04-22T10:00:00.000Z',
+        },
+        {
+          actor: 'tutor',
+          text: 'Good catch. Let us keep drilling the flower parts.',
+          createdAt: '2026-04-22T10:00:01.000Z',
+        },
+      ],
+    });
+
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === '/api/tutor/session/create') {
+        return Promise.resolve(jsonResponse({ snapshot: initialSnapshot }));
+      }
+
+      if (url === '/api/tutor/turn') {
+        return Promise.resolve(jsonResponse({ snapshot: completedSnapshot }));
+      }
+
+      if (url === '/api/tutor/article') {
+        return Promise.resolve(
+          jsonResponse({
+            article: {
+              id: 'article-1',
+              session_id: completedSnapshot.sessionId,
+              user_id: 'guest',
+              title: 'Pollination Review',
+              article_markdown: '# Pollination Review\n\n## Overview\n\nStudy notes.',
+              article_storage_path: '',
+              metadata_json: {},
+              created_at: '2026-04-22T10:00:02.000Z',
+              updated_at: '2026-04-22T10:00:02.000Z',
+            },
+            continuationContext: {
+              sourceSessionId: completedSnapshot.sessionId,
+              sourceArticleId: 'article-1',
+              topic: 'Python programming',
+              learnerLevel: 'beginner',
+              outline: ['Drill the confusing parts first.'],
+              turns: completedSnapshot.turns,
+              mediaAssets: [],
+              activeImageId: null,
+              canvasSummary: 'No board task remained active.',
+              canvas: completedSnapshot.canvas,
+              strengths: ['Learner catches mistakes quickly.'],
+              weaknesses: ['Learner still confuses key labels.'],
+              recommendedNextSteps: ['Resume with a labeling checkpoint.'],
+              resumeHint: 'Start with the confusing labels before moving forward.',
+              completedAt: '2026-04-22T10:00:02.000Z',
+            },
+          })
+        );
+      }
+
+      throw new Error(`Unexpected fetch request: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const saveGuestLessonMock = vi.mocked(saveGuestLesson);
+
+    render(<Harness />);
+
+    await waitFor(() => {
+      expect(latestSession).not.toBeNull();
+    });
+
+    await act(async () => {
+      await latestSession!.startSession();
+    });
+
+    await act(async () => {
+      await latestSession!.submitTranscript('Keep going');
+    });
+
+    await waitFor(() => {
+      expect(saveGuestLessonMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          continuationContext: expect.objectContaining({
+            sourceArticleId: 'article-1',
+            resumeHint: 'Start with the confusing labels before moving forward.',
+          }),
+        })
+      );
+    });
+  });
 });

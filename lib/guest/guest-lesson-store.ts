@@ -4,6 +4,7 @@ import type {
   SessionSummary,
   TeacherResponse,
 } from '@/lib/types/lesson';
+import type { TutorContinuationContext } from '@/lib/types/tutor';
 import type { LessonArticleRecord } from '@/lib/types/database';
 import { getGuestId } from './guest-id';
 import { readJson, writeJson } from './guest-storage';
@@ -32,6 +33,7 @@ export type GuestLessonRecord = {
   turns: GuestLessonTurn[];
   summary: SessionSummary | null;
   article: LessonArticleRecord | null;
+  continuationContext: TutorContinuationContext | null;
 };
 
 export type GuestHistoryItem = {
@@ -96,6 +98,7 @@ export function createGuestLesson(topicPrompt: string): GuestLessonRecord {
     turns: [],
     summary: null,
     article: null,
+    continuationContext: null,
   };
 }
 
@@ -162,4 +165,15 @@ export function getGuestArticle(articleId: string) {
   return (
     listGuestLessons().find((lesson) => lesson.article?.id === articleId)?.article ?? null
   );
+}
+
+export function getGuestContinuationContextByArticleId(articleId: string) {
+  return (
+    listGuestLessons().find((lesson) => lesson.article?.id === articleId)?.continuationContext ??
+    null
+  );
+}
+
+export function getGuestLessonByArticleId(articleId: string) {
+  return listGuestLessons().find((lesson) => lesson.article?.id === articleId) ?? null;
 }

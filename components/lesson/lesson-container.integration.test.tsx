@@ -249,6 +249,7 @@ describe('LessonContainer', () => {
       summary: null,
       article: null,
       ...overrides,
+      continuationContext: overrides.continuationContext ?? null,
     };
   }
 

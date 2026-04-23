@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { TutorShell } from '@/components/tutor/tutor-shell';
+import { getGuestContinuationContextByArticleId } from '@/lib/guest/guest-lesson-store';
 import { useTutorSession } from '@/lib/hooks/use-tutor-session';
 import { createEmptyTutorCanvasState } from '@/lib/tutor/runtime';
 import type {
@@ -57,8 +58,10 @@ const defaultRuntimeConfig: RuntimeConfig = {
 
 export function TutorExperience({
   initialSidebarCollapsed = false,
+  initialContinuationArticleId = null,
 }: {
   initialSidebarCollapsed?: boolean;
+  initialContinuationArticleId?: string | null;
 }) {
   const {
     snapshot,
@@ -78,7 +81,22 @@ export function TutorExperience({
   const [teacherAudioPending, setTeacherAudioPending] = useState(false);
   const [teacherStopSignal, setTeacherStopSignal] = useState(0);
   const [hasStarted, setHasStarted] = useState(false);
-  const isStartingSession = hasStarted && !snapshot && phase !== 'error';
+  const continuationConsumedRef = useRef(false);
+  const initialContinuationContext = useMemo(
+    () =>
+      initialContinuationArticleId
+        ? getGuestContinuationContextByArticleId(initialContinuationArticleId)
+        : null,
+    [initialContinuationArticleId]
+  );
+  const continuationNotice =
+    initialContinuationArticleId && !initialContinuationContext
+      ? 'We could not load the saved continuation context for that article. Start a fresh lesson or reopen the article after saving finishes.'
+      : null;
+  const attemptedStart =
+    hasStarted || Boolean(initialContinuationArticleId && initialContinuationContext);
+  const isStartingSession =
+    attemptedStart && !snapshot && phase !== 'error';
 
   const submitTranscript = useCallback(
     async (
@@ -114,6 +132,7 @@ export function TutorExperience({
         topic?: string;
         learnerLevel?: string;
         prompt?: string;
+        continuationContext?: TutorRuntimeSnapshot['continuation'];
       } = {}
     ) => {
       setTeacherSpeaking(false);
@@ -128,6 +147,28 @@ export function TutorExperience({
     },
     [startTutorSession]
   );
+
+  useEffect(() => {
+    if (!initialContinuationArticleId || continuationConsumedRef.current || hasStarted) {
+      return;
+    }
+
+    continuationConsumedRef.current = true;
+    if (!initialContinuationContext) {
+      if (typeof window !== 'undefined') {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+      return;
+    }
+
+    queueMicrotask(() => {
+      void startSession({ continuationContext: initialContinuationContext }).finally(() => {
+        if (typeof window !== 'undefined') {
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+      });
+    });
+  }, [hasStarted, initialContinuationArticleId, initialContinuationContext, startSession]);
 
   const handleFillBlankSubmit = useCallback(
     (answers: Record<string, string>) => {
@@ -479,7 +520,7 @@ export function TutorExperience({
     };
   }, []);
 
-  if (hasStarted && !snapshot && phase === 'error') {
+  if (attemptedStart && !snapshot && phase === 'error') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] px-6 text-zinc-900">
         <div className="w-full max-w-2xl border border-zinc-200 bg-white p-10 shadow-sm">
@@ -513,38 +554,48 @@ export function TutorExperience({
       : initialPendingSnapshot;
 
   return (
-    <TutorShell
-      snapshot={displaySnapshot}
-      isPendingStart={!hasStarted}
-      isStartingSession={isStartingSession}
-      onStartClick={() => {
-        setHasStarted(true);
-        void startSession();
-      }}
-      isSubmittingTurn={isSubmittingTurn}
-      speechToTextEnabled={runtimeConfig.speechToTextEnabled}
-      voiceEnabled={runtimeConfig.voiceEnabled}
-      teacherAudioPending={teacherAudioPending}
-      teacherStopSignal={teacherStopSignal}
-      ttsProvider={runtimeConfig.ttsProvider}
-      ttsModelId={runtimeConfig.ttsModelId}
-      teacherVoiceId={runtimeConfig.teacherVoiceId}
-      runtimeStatus={runtimeStatus}
-      onTranscript={submitTranscript}
-      onMoveToken={moveToken}
-      onChooseEquationAnswer={chooseEquationAnswer}
-      onFillBlankSubmit={handleFillBlankSubmit}
-      onCodeSubmit={handleCodeSubmit}
-      onCanvasSubmit={handleCanvasSubmit}
-      isGeneratingArticle={isGeneratingArticle}
-      article={article}
-      initialSidebarCollapsed={initialSidebarCollapsed}
-      teacherSpeaking={teacherSpeaking}
-      onTeacherSpeakingChange={setTeacherSpeaking}
-      onTeacherAudioPendingChange={setTeacherAudioPending}
-      onTeacherInterrupt={() => {
-        setTeacherStopSignal((value) => value + 1);
-      }}
-    />
+    <>
+      {continuationNotice && !hasStarted ? (
+        <div
+          role="alert"
+          className="mx-auto mt-4 max-w-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          {continuationNotice}
+        </div>
+      ) : null}
+      <TutorShell
+        snapshot={displaySnapshot}
+        isPendingStart={!hasStarted && !initialContinuationArticleId}
+        isStartingSession={isStartingSession}
+        onStartClick={() => {
+          setHasStarted(true);
+          void startSession();
+        }}
+        isSubmittingTurn={isSubmittingTurn}
+        speechToTextEnabled={runtimeConfig.speechToTextEnabled}
+        voiceEnabled={runtimeConfig.voiceEnabled}
+        teacherAudioPending={teacherAudioPending}
+        teacherStopSignal={teacherStopSignal}
+        ttsProvider={runtimeConfig.ttsProvider}
+        ttsModelId={runtimeConfig.ttsModelId}
+        teacherVoiceId={runtimeConfig.teacherVoiceId}
+        runtimeStatus={runtimeStatus}
+        onTranscript={submitTranscript}
+        onMoveToken={moveToken}
+        onChooseEquationAnswer={chooseEquationAnswer}
+        onFillBlankSubmit={handleFillBlankSubmit}
+        onCodeSubmit={handleCodeSubmit}
+        onCanvasSubmit={handleCanvasSubmit}
+        isGeneratingArticle={isGeneratingArticle}
+        article={article}
+        initialSidebarCollapsed={initialSidebarCollapsed}
+        teacherSpeaking={teacherSpeaking}
+        onTeacherSpeakingChange={setTeacherSpeaking}
+        onTeacherAudioPendingChange={setTeacherAudioPending}
+        onTeacherInterrupt={() => {
+          setTeacherStopSignal((value) => value + 1);
+        }}
+      />
+    </>
   );
 }

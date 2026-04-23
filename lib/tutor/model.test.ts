@@ -772,6 +772,86 @@ describe('lesson personality prompts', () => {
     expect(systemPrompt).toMatch(/openingSpeech should already sound warm, welcoming, and human/i);
   });
 
+  it('passes prior lesson continuation context into lesson preparation prompts', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  openingSpeech: 'We are picking up from the tricky part.',
+                  outline: ['Resume with one labeling rep.'],
+                  imageSearchQuery: 'pollination flower diagram',
+                  desiredImageCount: 1,
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    await generateLessonPreparation({
+      topic: 'pollination',
+      learnerLevel: 'beginner',
+      continuationContext: {
+        sourceSessionId: 'session-old',
+        sourceArticleId: 'article-1',
+        topic: 'pollination',
+        learnerLevel: 'beginner',
+        outline: ['Review the flower parts.'],
+        turns: [
+          {
+            actor: 'user',
+            text: 'I still mix up anther and stigma.',
+            createdAt: '2026-04-22T10:00:00.000Z',
+          },
+        ],
+        mediaAssets: [],
+        activeImageId: null,
+        canvasSummary: 'No board task remained active.',
+        canvas: {
+          mode: 'distribution',
+          headline: 'Tutor workspace',
+          instruction: 'Listen and respond.',
+          tokens: [],
+          zones: [],
+          equation: null,
+          fillBlank: null,
+          codeBlock: null,
+          multipleChoice: null,
+          numberLine: null,
+          tableGrid: null,
+          graphPlot: null,
+          matchingPairs: null,
+          ordering: null,
+          textResponse: null,
+          drawing: null,
+        },
+        strengths: ['Understands the big picture.'],
+        weaknesses: ['Still mixes up anther and stigma.'],
+        recommendedNextSteps: ['Resume with flower-part labeling.'],
+        resumeHint: 'Do not restart from zero; resume from flower-part labeling.',
+        completedAt: '2026-04-22T10:05:00.000Z',
+      },
+    });
+
+    const outbound = vi.mocked(buildOpenRouterRequest).mock.calls.at(-1)?.[0];
+    const userPrompt = outbound?.messages?.[1]?.content ?? '';
+
+    expect(userPrompt).toMatch(/continuation|prior lesson|resume/i);
+    expect(userPrompt).toMatch(/strengths/i);
+    expect(userPrompt).toMatch(/weaknesses/i);
+    expect(userPrompt).toMatch(/anther and stigma/i);
+  });
+
   it('gives the opening live tutor turn the same warm Zo-like personality contract', async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(

@@ -8,6 +8,7 @@ import type { TutorRuntimeSnapshot } from '@/lib/types/tutor';
 
 const mockStartSession = vi.fn();
 const mockUseTutorSession = vi.fn();
+const mockGetGuestContinuationContextByArticleId = vi.fn();
 const mockTutorShell = vi.fn((props: unknown) => {
   const typedProps = props as {
     onStartClick?: () => void;
@@ -39,6 +40,11 @@ function createDeferredPromise<T>() {
 
 vi.mock('@/lib/hooks/use-tutor-session', () => ({
   useTutorSession: () => mockUseTutorSession(),
+}));
+
+vi.mock('@/lib/guest/guest-lesson-store', () => ({
+  getGuestContinuationContextByArticleId: (...args: unknown[]) =>
+    mockGetGuestContinuationContextByArticleId(...args),
 }));
 
 vi.mock('@/components/tutor/tutor-shell', () => ({
@@ -121,6 +127,40 @@ describe('TutorExperience', () => {
       submitTranscript: vi.fn(),
       moveToken: vi.fn(),
       chooseEquationAnswer: vi.fn(),
+    });
+  });
+
+  it('auto-starts a resumed tutor session when a continuation article id is provided', async () => {
+    mockGetGuestContinuationContextByArticleId.mockReturnValue({
+      sourceSessionId: 'session-old',
+      sourceArticleId: 'article-1',
+      topic: 'pollination',
+      learnerLevel: 'beginner',
+      outline: ['Start with flower-part labeling.'],
+      turns: [],
+      mediaAssets: [],
+      activeImageId: null,
+      canvasSummary: 'No board task remained active.',
+      canvas: buildSnapshot().canvas,
+      strengths: ['Can explain the main idea verbally.'],
+      weaknesses: ['Still confuses flower-part labels.'],
+      recommendedNextSteps: ['Resume with one diagram labeling rep.'],
+      resumeHint: 'Restart from the confusing labels, not from the very beginning.',
+      completedAt: '2026-04-22T10:05:00.000Z',
+    });
+
+    render(<TutorExperience initialContinuationArticleId="article-1" />);
+
+    await waitFor(() => {
+      expect(mockStartSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          continuationContext: expect.objectContaining({
+            sourceArticleId: 'article-1',
+            resumeHint:
+              'Restart from the confusing labels, not from the very beginning.',
+          }),
+        })
+      );
     });
   });
 

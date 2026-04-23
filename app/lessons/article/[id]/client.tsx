@@ -9,19 +9,22 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import {
   ArrowLeft,
-  Calendar,
+  ArrowRight,
   Clock,
-  Target,
   CheckCircle2,
   Download,
   Share2,
   Check,
 } from 'lucide-react';
 import type { LessonArticleRecord } from '@/lib/types/database';
-import { getGuestArticle } from '@/lib/guest/guest-lesson-store';
+import {
+  getGuestArticle,
+  getGuestContinuationContextByArticleId,
+} from '@/lib/guest/guest-lesson-store';
 
 interface ArticleViewerProps {
   article: LessonArticleRecord;
+  continueHref?: string | null;
 }
 
 function resolveImageSrc(src?: string) {
@@ -41,7 +44,7 @@ function resolveImageSrc(src?: string) {
   return `/storage/v1/object/public/media-assets/${cleanPath}`;
 }
 
-export function ArticleViewer({ article }: ArticleViewerProps) {
+export function ArticleViewer({ article, continueHref = null }: ArticleViewerProps) {
   const [isDownloading, setIsDownloading] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
@@ -160,6 +163,15 @@ export function ArticleViewer({ article }: ArticleViewerProps) {
           </Link>
           
           <div className="flex gap-2">
+            {continueHref ? (
+              <Link
+                href={continueHref}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-500 rounded-full transition-colors"
+              >
+                Continue lesson
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            ) : null}
             <button
               onClick={handleShareLink}
               className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full transition-colors"
@@ -267,6 +279,10 @@ export function ArticleViewer({ article }: ArticleViewerProps) {
 
 export function GuestArticlePage({ articleId }: { articleId: string }) {
   const article = useMemo(() => getGuestArticle(articleId), [articleId]);
+  const continueHref = useMemo(() => {
+    const continuation = getGuestContinuationContextByArticleId(articleId);
+    return continuation ? `/?continue=${encodeURIComponent(articleId)}` : null;
+  }, [articleId]);
 
   if (!article) {
     return (
@@ -292,7 +308,7 @@ export function GuestArticlePage({ articleId }: { articleId: string }) {
               Article not found
             </h1>
             <p className="text-zinc-500 dark:text-zinc-400">
-              We couldn't find the lesson article you're looking for. It might have been deleted or the ID is incorrect.
+              We couldn&apos;t find the lesson article you&apos;re looking for. It might have been deleted or the ID is incorrect.
             </p>
           </div>
           <Link
@@ -307,5 +323,5 @@ export function GuestArticlePage({ articleId }: { articleId: string }) {
     );
   }
 
-  return <ArticleViewer article={article} />;
+  return <ArticleViewer article={article} continueHref={continueHref} />;
 }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildOpenRouterRequest } from '@/lib/ai/openrouter';
 import { formatTutorDebugMessages, formatTutorDebugValue } from '@/lib/tutor/debug-log';
-import type { TutorRuntimeSnapshot } from '@/lib/types/tutor';
+import { buildTutorContinuationContext } from '@/lib/tutor/continuation';
+import type { TutorContinuationNotes, TutorRuntimeSnapshot } from '@/lib/types/tutor';
 import { retryAsync } from '@/lib/utils/retry';
 
 interface ArticleGenerationRequest {
@@ -126,7 +127,7 @@ async function generateArticleContent(
     {
       role: 'system' as const,
       content:
-        'You generate lesson articles from tutoring session transcripts. MAKE SURE ITS FUN TO READ. Return strict JSON with keys: title (string), article_markdown (string). The article_markdown must be real, polished Markdown meant to be rendered in a markdown viewer.. Make it a study guide, not a transcript. Required structure: start with a single # title, then include sections such as ## Overview, ## Key Ideas, ## Worked Example or ## What We Practiced, ## Common Mistakes or ## Checks for Understanding, and ## Recap or ## Practice Promts when relevant. Use bullet lists, numbered steps, tables, and fenced code blocks with language tags when they help. Use LaTeX math with $...$ inline and $$...$$ display. Include image references using ![description](url) syntax where relevant images were shown. Do not output raw JSON inside article_markdown, do not write conversational filler, and do not leave it as plain prose paragraphs only.',
+        'You generate lesson articles from tutoring session transcripts. MAKE SURE ITS FUN TO READ. Return strict JSON with keys: title (string), article_markdown (string), continuation_notes (object). The article_markdown must be real, polished Markdown meant to be rendered in a markdown viewer. Make it a study guide, not a transcript. Required structure: start with a single # title, then include sections such as ## Overview, ## Key Ideas, ## Worked Example or ## What We Practiced, ## Common Mistakes or ## Checks for Understanding, and ## Recap or ## Practice Prompts when relevant. Use bullet lists, numbered steps, tables, and fenced code blocks with language tags when they help. Use LaTeX math with $...$ inline and $$...$$ display. Include image references using ![description](url) syntax where relevant images were shown. continuation_notes is hidden system data for resuming the lesson later and must contain strengths (string[]), weaknesses (string[]), recommendedNextSteps (string[]), and resumeHint (string). Do not output raw JSON inside article_markdown, do not write conversational filler, and do not leave it as plain prose paragraphs only.',
     },
     {
       role: 'user' as const,
@@ -197,6 +198,7 @@ async function generateArticleContent(
   const parsed = parseJson(content) as {
     title?: string;
     article_markdown?: string;
+    continuation_notes?: Partial<TutorContinuationNotes>;
   };
 
   if (!parsed || !parsed.article_markdown) {
@@ -267,12 +269,19 @@ export async function POST(request: NextRequest) {
         turnCount: snapshot.turns.length,
         imageCount: snapshot.mediaAssets.length,
         first_image_url: snapshot.mediaAssets[0]?.url,
+        continuation_available: true,
       },
       created_at: now,
       updated_at: now,
     };
 
-    return NextResponse.json({ article });
+    const continuationContext = buildTutorContinuationContext({
+      snapshot,
+      articleId,
+      notes: parsed.continuation_notes,
+    });
+
+    return NextResponse.json({ article, continuationContext });
   } catch (error) {
     console.error('Error generating article:', error);
     return NextResponse.json(

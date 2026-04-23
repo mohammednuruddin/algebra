@@ -1125,6 +1125,7 @@ export function createTutorSnapshot(input: {
   canvas: TutorCanvasState;
   turns?: TutorRuntimeSnapshot['turns'];
   intake?: TutorRuntimeSnapshot['intake'];
+  continuation?: TutorRuntimeSnapshot['continuation'];
   status?: TutorRuntimeSnapshot['status'];
   speechRevision?: number;
 }) {
@@ -1143,6 +1144,7 @@ export function createTutorSnapshot(input: {
     canvas: input.canvas,
     turns: input.turns || [],
     intake: input.intake ?? null,
+    continuation: input.continuation ?? null,
   } satisfies TutorRuntimeSnapshot;
 }
 

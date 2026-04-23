@@ -15,10 +15,12 @@ import {
   updateTutorEquationChoice,
 } from '@/lib/tutor/runtime';
 import { formatTutorDebugMessages, formatTutorDebugValue } from '@/lib/tutor/debug-log';
+import { buildTutorContinuationContext } from '@/lib/tutor/continuation';
 import { retryAsync } from '@/lib/utils/retry';
 import type {
   TutorCanvasEvidence,
   TutorCanvasInteraction,
+  TutorContinuationContext,
   TutorLlmDebugTrace,
   TutorRuntimeSnapshot,
   TutorSessionCreateResponse,
@@ -114,7 +116,10 @@ export function useTutorSession() {
       })
         .then(async (response) => {
           if (!response.ok) return;
-          const payload = (await response.json()) as { article?: LessonArticleRecord };
+          const payload = (await response.json()) as {
+            article?: LessonArticleRecord;
+            continuationContext?: TutorContinuationContext;
+          };
           if (payload.article) {
             setArticle(payload.article);
             const lessonRecord: GuestLessonRecord = {
@@ -124,6 +129,12 @@ export function useTutorSession() {
               mediaAssets: toGuestLessonMediaAssets(snapshot),
               activeImageId: snapshot.activeImageId,
               article: payload.article,
+              continuationContext:
+                payload.continuationContext ||
+                buildTutorContinuationContext({
+                  snapshot,
+                  articleId: payload.article.id,
+                }),
             };
             await retryAsync(
               async () => {
@@ -147,6 +158,7 @@ export function useTutorSession() {
         topic?: string;
         learnerLevel?: string;
         prompt?: string;
+        continuationContext?: TutorContinuationContext | null;
       } = {}
     ) => {
       setPhase('preparing');

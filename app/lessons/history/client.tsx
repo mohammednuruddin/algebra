@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Search, Calendar, Clock, Target, CheckCircle2, BookOpen, X, ChevronRight, ArrowLeft } from 'lucide-react';
+import { Search, Calendar, Clock, Target, BookOpen, X, ChevronRight } from 'lucide-react';
 import type { LessonHistoryItem } from './page';
 import { listGuestHistoryItems } from '@/lib/guest/guest-lesson-store';
 
@@ -222,7 +222,7 @@ export function LessonHistoryClient({
             Your Learning Journey Begins
           </h2>
           <p className="text-lg text-zinc-500 dark:text-zinc-400 mb-10 leading-relaxed">
-            You haven't completed any lessons yet. Dive into your first topic and start building your knowledge base.
+            You haven&apos;t completed any lessons yet. Dive into your first topic and start building your knowledge base.
           </p>
           <Link
             href="/"
@@ -240,7 +240,7 @@ export function LessonHistoryClient({
             No lessons found
           </h2>
           <p className="text-zinc-500 dark:text-zinc-400 mb-8 max-w-md">
-            We couldn't find any lessons matching your search criteria. Try adjusting your filters or search terms.
+            We couldn&apos;t find any lessons matching your search criteria. Try adjusting your filters or search terms.
           </p>
           <button
             onClick={clearFilters}

@@ -169,6 +169,7 @@ export async function POST(request: NextRequest) {
             },
           ],
           intake: null,
+          continuation: null,
           status:
             applied.sessionComplete || modelResult.response.sessionComplete
               ? 'completed'
@@ -218,6 +219,7 @@ export async function POST(request: NextRequest) {
           topic: intakeResult.response.topic || snapshot.intake?.topic || null,
           learnerLevel: nextLearnerLevel,
         },
+        continuation: null,
         status: 'active',
         speechRevision: snapshot.speechRevision + 1,
       });
@@ -241,6 +243,7 @@ export async function POST(request: NextRequest) {
       outline: snapshot.lessonOutline,
       imageAssets: snapshot.mediaAssets,
       activeImageId: snapshot.activeImageId,
+      continuationContext: snapshot.continuation,
       transcript,
       canvasSummary,
       canvasStateContext,
@@ -299,6 +302,7 @@ export async function POST(request: NextRequest) {
       canvas: applied.canvas,
       turns,
       intake: snapshot.intake,
+      continuation: snapshot.continuation,
       status:
         applied.sessionComplete || modelResult.response.sessionComplete ? 'completed' : 'active',
       speechRevision: snapshot.speechRevision + 1,

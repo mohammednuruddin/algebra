@@ -811,6 +811,27 @@ export interface TutorTurn {
   canvasInteraction?: TutorCanvasInteraction | null;
 }
 
+export interface TutorContinuationNotes {
+  strengths: string[];
+  weaknesses: string[];
+  recommendedNextSteps: string[];
+  resumeHint: string;
+}
+
+export interface TutorContinuationContext extends TutorContinuationNotes {
+  sourceSessionId: string;
+  sourceArticleId: string | null;
+  topic: string;
+  learnerLevel: string;
+  outline: string[];
+  turns: TutorTurn[];
+  mediaAssets: TutorMediaAsset[];
+  activeImageId: string | null;
+  canvasSummary: string;
+  canvas: TutorCanvasState;
+  completedAt: string;
+}
+
 export interface TutorRuntimeSnapshot {
   sessionId: string;
   prompt: string;
@@ -826,6 +847,7 @@ export interface TutorRuntimeSnapshot {
   canvas: TutorCanvasState;
   turns: TutorTurn[];
   intake: TutorIntakeState | null;
+  continuation?: TutorContinuationContext | null;
 }
 
 export interface TutorLlmDebugTrace {

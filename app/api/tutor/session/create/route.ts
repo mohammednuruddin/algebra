@@ -13,16 +13,32 @@ import {
   createEmptyTutorCanvasState,
   createTutorSnapshot,
 } from '@/lib/tutor/runtime';
-import type { TutorSessionCreateResponse } from '@/lib/types/tutor';
+import type {
+  TutorContinuationContext,
+  TutorSessionCreateResponse,
+} from '@/lib/types/tutor';
 
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as { topic?: string; learnerLevel?: string; prompt?: string };
-    const topic = body.topic?.trim() || body.prompt?.trim() || '';
-    const learnerLevel = body.learnerLevel?.trim() || 'unknown';
+    const body = (await request.json()) as {
+      topic?: string;
+      learnerLevel?: string;
+      prompt?: string;
+      continuationContext?: TutorContinuationContext | null;
+    };
+    const continuationContext = body.continuationContext ?? null;
+    const topic =
+      body.topic?.trim() ||
+      body.prompt?.trim() ||
+      continuationContext?.topic?.trim() ||
+      '';
+    const learnerLevel =
+      body.learnerLevel?.trim() ||
+      continuationContext?.learnerLevel?.trim() ||
+      'unknown';
     const sessionId = `tutor_${randomUUID()}`;
 
-    if (!topic) {
+    if (!topic && !continuationContext) {
       const intakeResult = await generateTutorIntakeTurn({
         stage: 'session_create',
         history: [],
@@ -53,6 +69,7 @@ export async function POST(request: NextRequest) {
           topic: intakeResult.response.topic,
           learnerLevel: intakeResult.response.learnerLevel,
         },
+        continuation: null,
         status: 'active',
         speechRevision: 1,
       });
@@ -73,22 +90,29 @@ export async function POST(request: NextRequest) {
     const preparation = await generateLessonPreparation({
       topic,
       learnerLevel,
+      continuationContext,
     });
-    const imageSearchResult = await searchLessonImages({
-      topic,
-      searchQuery: preparation.imageSearchQuery,
-      desiredCount: preparation.desiredImageCount,
-    });
+    const imageAssets =
+      continuationContext?.mediaAssets && continuationContext.mediaAssets.length > 0
+        ? continuationContext.mediaAssets
+        : (
+            await searchLessonImages({
+              topic,
+              searchQuery: preparation.imageSearchQuery,
+              desiredCount: preparation.desiredImageCount,
+            })
+          ).assets;
     const modelResult = await generateInitialTutorResponse({
       topic,
       learnerLevel,
       outline: preparation.outline,
-      imageAssets: imageSearchResult.assets,
+      imageAssets,
       openingSpeech: preparation.openingSpeech,
+      continuationContext,
     });
     const activeImageId = applyTutorMediaCommands({
-      currentActiveImageId: null,
-      mediaAssets: imageSearchResult.assets,
+      currentActiveImageId: continuationContext?.activeImageId ?? null,
+      mediaAssets: imageAssets,
       commands: modelResult.response.commands,
     });
     const canvasResult = applyTutorCommands(
@@ -96,7 +120,7 @@ export async function POST(request: NextRequest) {
       modelResult.response.commands,
       {
         canvasAction: modelResult.response.canvasAction,
-        mediaAssets: imageSearchResult.assets,
+        mediaAssets: imageAssets,
         defaultImageId: activeImageId,
       }
     );
@@ -109,7 +133,7 @@ export async function POST(request: NextRequest) {
       lessonOutline: preparation.outline,
       speech: modelResult.response.speech,
       awaitMode: modelResult.response.awaitMode,
-      mediaAssets: imageSearchResult.assets,
+      mediaAssets: imageAssets,
       activeImageId,
       canvas: canvasResult.canvas,
       turns: [
@@ -120,6 +144,7 @@ export async function POST(request: NextRequest) {
         },
       ],
       intake: null,
+      continuation: continuationContext,
       status: canvasResult.sessionComplete ? 'completed' : modelResult.response.status,
       speechRevision: 1,
     });

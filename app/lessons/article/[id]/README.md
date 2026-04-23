@@ -31,6 +31,12 @@ This directory contains the article viewer page for displaying completed lesson 
    - Markdown content rendered (basic pre-formatted display)
    - Responsive layout with sidebar on desktop, stacked on mobile
 
+5. **Lesson Continuation**
+   - "Continue lesson" CTA appears when hidden continuation context exists
+   - CTA links back to the tutor home surface with the article id marker
+   - The continuation packet stays hidden from the rendered article body
+   - The tutor uses that packet to resume from prior strengths, weaknesses, turns, and visuals
+
 ## Files
 
 - `page.tsx` - Server component that fetches article data and handles authentication
@@ -48,8 +54,9 @@ Main client component that displays:
 - Article content area (3/4 width on desktop)
 - Metadata sidebar (1/4 width on desktop)
 - Responsive grid layout
+- Optional continue-lesson CTA when guest continuation context exists
 
-### Metadata Sidebar Features
+### Metadata Header Features
 
 - **Topic**: Displays the lesson topic with Target icon
 - **Date**: Formatted date with Calendar icon
@@ -65,9 +72,11 @@ Main client component that displays:
 
 ## Testing
 
-All tests pass (22 tests total):
-- 18 tests for client component (metadata display, formatting, navigation)
-- 4 tests for server component (authentication, data fetching, authorization)
+Tests cover:
+- article metadata and markdown rendering
+- share feedback
+- continue-lesson CTA rendering
+- guest article not-found state
 
 Run tests:
 ```bash
