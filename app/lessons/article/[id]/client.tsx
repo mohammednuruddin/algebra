@@ -179,142 +179,87 @@ export function ArticleViewer({ article }: ArticleViewerProps) {
         </div>
       </header>
 
-      <main className="max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-20">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16">
-          
-          {/* Main Article Content */}
-          <div className="lg:col-span-8 lg:col-start-1">
-            <article id="article-content" className="bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-zinc-200/60 dark:border-zinc-800/60 p-8 sm:p-12 lg:p-16">
-              <header className="mb-12 border-b border-zinc-100 dark:border-zinc-800 pb-10">
-                <div className="flex items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400 mb-6">
-                  {metadata?.topic && (
-                    <span className="uppercase tracking-wider font-semibold text-indigo-600 dark:text-indigo-400">
-                      {metadata.topic}
-                    </span>
-                  )}
-                  {metadata?.topic && <span>•</span>}
-                  <time dateTime={metadata?.date || article.created_at}>
-                    {formatDate(metadata?.date)}
-                  </time>
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-20">
+        <article id="article-content" className="py-8 sm:py-12 lg:py-16">
+          <header className="mb-16 border-b border-zinc-200 dark:border-zinc-800 pb-10">
+            <div className="flex items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400 mb-6">
+              {metadata?.topic && (
+                <span className="uppercase tracking-wider font-semibold text-indigo-600 dark:text-indigo-400">
+                  {metadata.topic}
+                </span>
+              )}
+              {metadata?.topic && <span>•</span>}
+              <time dateTime={metadata?.date || article.created_at}>
+                {formatDate(metadata?.date)}
+              </time>
+            </div>
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-serif font-medium text-zinc-900 dark:text-zinc-50 tracking-tight leading-tight mb-8">
+              {article.title}
+            </h1>
+            
+            {/* Rich Lesson Metadata */}
+            <div className="flex flex-wrap items-center gap-6 sm:gap-10 text-sm text-zinc-500 dark:text-zinc-400 pt-6 mt-6 border-t border-zinc-100 dark:border-zinc-800/50">
+              {metadata?.duration && (
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-zinc-400" />
+                  <span>{formatDuration(metadata.duration)} read</span>
                 </div>
-                <h1 className="text-4xl sm:text-5xl lg:text-6xl font-serif font-medium text-zinc-900 dark:text-zinc-50 tracking-tight leading-tight mb-6">
-                  {article.title}
-                </h1>
-                {metadata?.duration && (
-                  <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
-                    <Clock className="w-4 h-4" />
-                    <span>{formatDuration(metadata.duration)} read</span>
-                  </div>
-                )}
-              </header>
-
-              <div className="prose prose-zinc dark:prose-invert prose-lg max-w-none prose-headings:font-serif prose-headings:font-medium prose-p:leading-relaxed prose-p:text-zinc-600 dark:prose-p:text-zinc-300 prose-a:text-indigo-600 dark:prose-a:text-indigo-400 hover:prose-a:text-indigo-500 prose-img:rounded-2xl prose-img:shadow-md">
-                <ReactMarkdown
-                  remarkPlugins={[remarkMath, remarkGfm]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={{
-                    img: ({ src, ...props }) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        {...props}
-                        src={resolveImageSrc(
-                          typeof src === 'string' ? src : undefined
-                        )}
-                        className="rounded-2xl max-w-full h-auto object-cover"
-                        loading="lazy"
-                        alt={props.alt || 'Article image'}
-                      />
-                    ),
-                  }}
-                >
-                  {article.article_markdown}
-                </ReactMarkdown>
+              )}
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-zinc-400" />
+                <span>
+                  {metadata?.milestones_covered ?? 0} / {metadata?.total_milestones ?? 0} milestones
+                </span>
               </div>
-            </article>
+              {metadata?.completion_percentage !== undefined && (
+                <div className="flex items-center gap-3 flex-1 min-w-[200px]">
+                  <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                    {Math.round(metadata.completion_percentage)}%
+                  </span>
+                  <div className="w-32 bg-zinc-100 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="bg-indigo-600 dark:bg-indigo-500 h-full rounded-full transition-all duration-500 ease-out"
+                      style={{ width: `${metadata.completion_percentage}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </header>
+
+          <div className="prose prose-zinc dark:prose-invert prose-lg max-w-none prose-headings:font-serif prose-headings:font-medium prose-p:leading-relaxed prose-p:text-zinc-600 dark:prose-p:text-zinc-300 prose-a:text-indigo-600 dark:prose-a:text-indigo-400 hover:prose-a:text-indigo-500 prose-img:rounded-2xl prose-img:shadow-md">
+            <ReactMarkdown
+              remarkPlugins={[remarkMath, remarkGfm]}
+              rehypePlugins={[rehypeKatex]}
+              components={{
+                img: ({ src, ...props }) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    {...props}
+                    src={resolveImageSrc(
+                      typeof src === 'string' ? src : undefined
+                    )}
+                    className="rounded-2xl max-w-full h-auto object-cover"
+                    loading="lazy"
+                    alt={props.alt || 'Article image'}
+                  />
+                ),
+              }}
+            >
+              {article.article_markdown}
+            </ReactMarkdown>
           </div>
-
-          {/* Sidebar / Metadata */}
-          <aside className="lg:col-span-4">
-            <div className="sticky top-24 space-y-8">
-              <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60 p-8 shadow-sm">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mb-6">
-                  Lesson Details
-                </h3>
-
-              <div className="space-y-6">
-                {metadata?.topic && (
-                  <div>
-                    <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400 mb-1.5">
-                      <Target className="w-4 h-4" />
-                      <span className="font-medium">Topic</span>
-                    </div>
-                    <p className="text-base text-zinc-900 dark:text-zinc-50 ml-6">
-                      {metadata.topic}
-                    </p>
-                  </div>
-                )}
-
-                <div>
-                  <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400 mb-1.5">
-                    <Calendar className="w-4 h-4" />
-                    <span className="font-medium">Date</span>
-                  </div>
-                  <p className="text-base text-zinc-900 dark:text-zinc-50 ml-6">
-                    {formatDate(metadata?.date)}
-                  </p>
-                </div>
-
-                <div>
-                  <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400 mb-1.5">
-                    <Clock className="w-4 h-4" />
-                    <span className="font-medium">Duration</span>
-                  </div>
-                  <p className="text-base text-zinc-900 dark:text-zinc-50 ml-6">
-                    {formatDuration(metadata?.duration)}
-                  </p>
-                </div>
-
-                <div>
-                  <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400 mb-1.5">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span className="font-medium">Milestones</span>
-                  </div>
-                  <p className="text-base text-zinc-900 dark:text-zinc-50 ml-6">
-                    {metadata?.milestones_covered ?? 0} / {metadata?.total_milestones ?? 0} completed
-                  </p>
-                </div>
-
-                {metadata?.completion_percentage !== undefined && (
-                  <div className="pt-2">
-                    <div className="flex items-center justify-between text-sm mb-2">
-                      <span className="text-zinc-500 dark:text-zinc-400 font-medium">Completion</span>
-                      <span className="text-zinc-900 dark:text-zinc-50 font-semibold">
-                        {Math.round(metadata.completion_percentage)}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full h-2.5 overflow-hidden">
-                      <div
-                        className="bg-indigo-600 dark:bg-indigo-500 h-full rounded-full transition-all duration-500 ease-out"
-                        style={{ width: `${metadata.completion_percentage}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-8 pt-6 border-t border-zinc-100 dark:border-zinc-800">
-                <Link
-                  href="/lessons/history"
-                  className="flex items-center justify-center gap-2 w-full px-4 py-2.5 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 rounded-xl transition-colors"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  View All Lessons
-                </Link>
-              </div>
-            </div>
-            </div>
-          </aside>
-        </div>
+          
+          <footer className="mt-16 pt-8 border-t border-zinc-200 dark:border-zinc-800 flex justify-center">
+            <Link
+              href="/lessons/history"
+              className="inline-flex items-center justify-center gap-2 px-6 py-3 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Return to Library
+            </Link>
+          </footer>
+        </article>
       </main>
     </div>
   );

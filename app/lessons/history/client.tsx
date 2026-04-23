@@ -136,15 +136,6 @@ export function LessonHistoryClient({
 
   return (
     <main className="max-w-7xl mx-auto px-6 py-12 lg:py-16 min-h-screen bg-zinc-50/50 dark:bg-zinc-950/50">
-      <div className="mb-8 max-w-4xl mx-auto">
-        <Link 
-          href="/" 
-          className="inline-flex items-center text-sm font-medium text-zinc-500 hover:text-zinc-900 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4 mr-1.5" />
-          Back to Home
-        </Link>
-      </div>
       
       {lessons.length > 0 && (
         <div className="mb-12">
@@ -305,15 +296,6 @@ export function LessonHistoryClient({
                         <p className="text-center font-serif text-xl font-bold opacity-90 drop-shadow-sm leading-tight line-clamp-3">
                           {lesson.title}
                         </p>
-                      </div>
-                    )}
-                    
-                    {/* Badge Overlay */}
-                    {metadata?.topic && (
-                      <div className="absolute top-4 left-4">
-                        <span className="inline-flex items-center px-3 py-1 rounded-full bg-black/30 backdrop-blur-md text-xs font-semibold text-white tracking-wide shadow-sm border border-white/20">
-                          {metadata.topic}
-                        </span>
                       </div>
                     )}
                   </div>

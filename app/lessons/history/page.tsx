@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { LessonHistoryClient } from './client';
-import { BookOpen } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 
 export const metadata = {
   title: 'Lesson History - AI Teaching Platform',
@@ -24,23 +25,23 @@ export interface LessonHistoryItem {
 
 export default async function LessonHistoryPage() {
   return (
-    <div className="min-h-screen bg-white dark:bg-zinc-950 transition-colors duration-300">
-      <header className="sticky top-0 z-10 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border-b border-zinc-100 dark:border-zinc-900">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center shadow-lg shadow-zinc-200 dark:shadow-none">
-              <BookOpen className="w-5 h-5 text-white dark:text-zinc-900" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
-                Lesson History
-              </h1>
-              <p className="hidden sm:block text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                This browser&apos;s learning archive
-              </p>
-            </div>
+    <div className="min-h-screen bg-zinc-50/50 dark:bg-zinc-950/50 transition-colors duration-300">
+      <header className="sticky top-0 z-10 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800">
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <Link 
+              href="/" 
+              className="inline-flex items-center gap-2 text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Home
+            </Link>
+            <div className="w-px h-4 bg-zinc-300 dark:bg-zinc-700 hidden sm:block" />
+            <h1 className="text-xs font-bold tracking-[0.2em] uppercase text-zinc-900 dark:text-zinc-50 hidden sm:block">
+              Lesson Library
+            </h1>
           </div>
-          <div className="text-sm text-zinc-500 dark:text-zinc-400 font-medium">
+          <div className="text-[10px] font-bold tracking-[0.2em] uppercase text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-full">
             Guest Mode
           </div>
         </div>
