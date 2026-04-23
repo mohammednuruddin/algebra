@@ -3,6 +3,7 @@ import {
   type OpenRouterContentPart,
   type OpenRouterMessage,
 } from '@/lib/ai/openrouter';
+import { formatTutorImageContextLine } from '@/lib/media/generated-image-prompts';
 import { buildTutorContinuationPromptContext } from '@/lib/tutor/continuation';
 import { formatTutorDebugMessages, formatTutorDebugValue } from '@/lib/tutor/debug-log';
 import type {
@@ -1362,9 +1363,7 @@ export async function generateInitialTutorResponse(input: {
       })
     : 'No continuation context.';
   const imageContext = input.imageAssets.length
-    ? input.imageAssets
-        .map((asset, index) => `${index}: ${asset.id} | ${asset.altText} | ${asset.description}`)
-        .join('\n')
+    ? input.imageAssets.map((asset, index) => `${index}: ${formatTutorImageContextLine(asset)}`).join('\n')
     : 'No prepared images.';
   const messages: TutorMessage[] = [
     {
@@ -1428,12 +1427,10 @@ export async function generateTutorTurn(args: {
       })
     : 'No continuation context.';
   const imageContext = args.imageAssets.length
-    ? args.imageAssets
-        .map((asset, index) => `${index}: ${asset.id} | ${asset.altText} | ${asset.description}`)
-        .join('\n')
+    ? args.imageAssets.map((asset, index) => `${index}: ${formatTutorImageContextLine(asset)}`).join('\n')
     : 'No prepared images.';
-  const activeImageContext =
-    args.imageAssets.find((asset) => asset.id === args.activeImageId)?.altText || 'none';
+  const activeImageAsset = args.imageAssets.find((asset) => asset.id === args.activeImageId);
+  const activeImageContext = activeImageAsset ? formatTutorImageContextLine(activeImageAsset) : 'none';
   const messages: TutorMessage[] = [
     {
       role: 'system',

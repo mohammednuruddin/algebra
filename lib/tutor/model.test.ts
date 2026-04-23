@@ -681,6 +681,152 @@ describe('generateTutorTurn', () => {
     expect(promptText).toMatch(/"canvasInteraction":\s*\{\s*"mode":\s*"text_response"/i);
   });
 
+  it('includes generated image quiz metadata in the tutor image context', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  speech: 'Look at the quiz variant and tell me what changed.',
+                  awaitMode: 'voice_or_canvas',
+                  sessionComplete: false,
+                  commands: [],
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    await generateTutorTurn({
+      topic: 'Plant cells',
+      learnerLevel: 'beginner',
+      outline: ['Use one concrete example.'],
+      imageAssets: [
+        {
+          id: 'generated_1',
+          altText: 'Plant diagram quiz variant',
+          description: 'Same diagram with one removed label and one swapped label.',
+          url: 'https://example.com/generated.webp',
+          metadata: {
+            assetKind: 'generated',
+            generationKind: 'edit',
+            variantKind: 'quiz_swap',
+            requestedEdits: {
+              remove: ['nucleus'],
+              swap: [{ from: 'evaporation', to: 'condensation' }],
+            },
+            verifiedEdits: {
+              removedLabelsVerified: ['nucleus'],
+              swappedLabelsVerified: [{ from: 'evaporation', to: 'condensation' }],
+            },
+            suggestedUse: 'Ask the learner what is missing and what is wrong.',
+          },
+        },
+      ],
+      activeImageId: null,
+      transcript: 'Okay.',
+      canvasSummary: 'No active canvas.',
+      recentTurns: 'tutor: Look closely at the diagram.',
+    });
+
+    const outbound = vi.mocked(buildOpenRouterRequest).mock.calls.at(-1)?.[0];
+    const userPrompt = outbound?.messages?.[1]?.content;
+    const promptText =
+      typeof userPrompt === 'string'
+        ? userPrompt
+        : userPrompt?.find((part) => part.type === 'text')?.text || '';
+
+    expect(promptText).toContain('generated');
+    expect(promptText).toContain('quiz_swap');
+    expect(promptText).toContain(
+      'requested edits: {"remove":["nucleus"],"swap":[{"from":"evaporation","to":"condensation"}]}'
+    );
+    expect(promptText).toContain(
+      'verified edits: {"remove":["nucleus"],"swap":[{"from":"evaporation","to":"condensation"}]}'
+    );
+  });
+
+  it('uses generated image metadata in the currently shown image context when activeImageId matches', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  speech: 'Look at the current quiz variant and tell me what changed.',
+                  awaitMode: 'voice_or_canvas',
+                  sessionComplete: false,
+                  commands: [],
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    await generateTutorTurn({
+      topic: 'Plant cells',
+      learnerLevel: 'beginner',
+      outline: ['Use one concrete example.'],
+      imageAssets: [
+        {
+          id: 'generated_active',
+          altText: 'Plant diagram quiz variant',
+          description: 'Same diagram with one removed label and one swapped label.',
+          url: 'https://example.com/generated-active.webp',
+          metadata: {
+            assetKind: 'generated',
+            generationKind: 'edit',
+            variantKind: 'quiz_swap',
+            requestedEdits: {
+              remove: ['nucleus'],
+              swap: [{ from: 'evaporation', to: 'condensation' }],
+            },
+            verifiedEdits: {
+              removedLabelsVerified: ['nucleus'],
+              swappedLabelsVerified: [{ from: 'evaporation', to: 'condensation' }],
+            },
+          },
+        },
+      ],
+      activeImageId: 'generated_active',
+      transcript: 'Okay.',
+      canvasSummary: 'No active canvas.',
+      recentTurns: 'tutor: Look closely at the current diagram.',
+    });
+
+    const outbound = vi.mocked(buildOpenRouterRequest).mock.calls.at(-1)?.[0];
+    const userPrompt = outbound?.messages?.[1]?.content;
+    const promptText =
+      typeof userPrompt === 'string'
+        ? userPrompt
+        : userPrompt?.find((part) => part.type === 'text')?.text || '';
+
+    expect(promptText).toContain('Currently shown image: generated_active');
+    expect(promptText).toContain('variant: quiz_swap');
+    expect(promptText).toContain(
+      'verified edits: {"remove":["nucleus"],"swap":[{"from":"evaporation","to":"condensation"}]}'
+    );
+  });
+
   it('tells the live tutor model to sound warm, encouraging, empathetic, and lightly playful', async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -893,5 +1039,74 @@ describe('lesson personality prompts', () => {
     expect(systemPrompt).toMatch(/warm, encouraging, emotionally aware/i);
     expect(systemPrompt).toMatch(/kind human coach|lightly playful/i);
     expect(systemPrompt).toMatch(/avoid robotic|worksheet/i);
+  });
+
+  it('includes generated image quiz metadata in the opening tutor image context', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  speech: 'Look at the quiz variant and tell me what changed.',
+                  awaitMode: 'voice_or_canvas',
+                  sessionComplete: false,
+                  canvasAction: 'keep',
+                  commands: [],
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    await generateInitialTutorResponse({
+      topic: 'pollination',
+      learnerLevel: 'beginner',
+      outline: ['Use one concrete example.'],
+      imageAssets: [
+        {
+          id: 'generated_1',
+          altText: 'Plant diagram quiz variant',
+          description: 'Same diagram with one removed label and one swapped label.',
+          url: 'https://example.com/generated.webp',
+          metadata: {
+            assetKind: 'generated',
+            generationKind: 'edit',
+            variantKind: 'quiz_swap',
+            requestedEdits: {
+              remove: ['nucleus'],
+              swap: [{ from: 'evaporation', to: 'condensation' }],
+            },
+            verifiedEdits: {
+              removedLabelsVerified: ['nucleus'],
+              swappedLabelsVerified: [{ from: 'evaporation', to: 'condensation' }],
+            },
+            suggestedUse: 'Ask the learner what is missing and what is wrong.',
+          },
+        },
+      ],
+      openingSpeech: 'Let’s explore pollination together.',
+    });
+
+    const outbound = vi.mocked(buildOpenRouterRequest).mock.calls.at(-1)?.[0];
+    const userPrompt = outbound?.messages?.[1]?.content ?? '';
+
+    expect(userPrompt).toContain('generated');
+    expect(userPrompt).toContain('quiz_swap');
+    expect(userPrompt).toContain(
+      'requested edits: {"remove":["nucleus"],"swap":[{"from":"evaporation","to":"condensation"}]}'
+    );
+    expect(userPrompt).toContain(
+      'verified edits: {"remove":["nucleus"],"swap":[{"from":"evaporation","to":"condensation"}]}'
+    );
   });
 });

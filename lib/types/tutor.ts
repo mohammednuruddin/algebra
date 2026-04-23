@@ -55,8 +55,50 @@ export interface TutorMediaAsset {
   thumbnailUrl?: string;
   source?: string;
   domain?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: TutorMediaAssetMetadata;
 }
+
+export type TutorGeneratedImageSwap = {
+  from: string;
+  to: string;
+};
+
+export type TutorGeneratedImageEdits = {
+  remove: string[];
+  swap: TutorGeneratedImageSwap[];
+};
+
+export interface TutorGeneratedImageVerifiedEdits {
+  removedLabelsVerified: string[];
+  swappedLabelsVerified: TutorGeneratedImageSwap[];
+}
+
+export interface TutorGeneratedImageMetadata extends Record<string, unknown> {
+  assetKind: 'generated';
+  generationKind: 'generate' | 'edit';
+  variantKind: 'teaching_visual' | 'quiz_unlabeled' | 'quiz_swap' | null;
+  baseImageId?: string;
+  requestedEdits?: TutorGeneratedImageEdits;
+  verifiedEdits?: TutorGeneratedImageVerifiedEdits;
+  suggestedUse?: string;
+  tutorGuidance?: string[];
+  sourceJobId?: string;
+}
+
+export interface TutorLessonImageMetadata extends Record<string, unknown> {
+  assetKind?: 'search';
+  imageKind?: string;
+  showsProcess?: boolean;
+  keyObjects?: string[];
+  keyRegions?: string[];
+  suggestedUse?: string;
+  tutorGuidance?: string[];
+  teachingValueScore?: number;
+  childFriendlinessScore?: number;
+  clutterScore?: number;
+}
+
+export type TutorMediaAssetMetadata = TutorGeneratedImageMetadata | TutorLessonImageMetadata;
 
 export interface TutorEquationChoice {
   id: string;
