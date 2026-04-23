@@ -1,13 +1,10 @@
 import { NextResponse } from 'next/server';
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 
-/**
- * Generate a single-use token for ElevenLabs Scribe (Speech-to-Text)
- * This endpoint is protected and requires authentication
- */
+export const fetchCache = 'force-no-store';
+
 export async function GET() {
   try {
-    // Check if API key is configured
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {
       console.error('ELEVENLABS_API_KEY is not configured');
@@ -17,11 +14,17 @@ export async function GET() {
       );
     }
 
-    // Create ElevenLabs client and generate single-use token
     const elevenlabs = new ElevenLabsClient({ apiKey });
     const token = await elevenlabs.tokens.singleUse.create('realtime_scribe');
 
-    return NextResponse.json({ token: token.token });
+    return NextResponse.json(
+      { token: token.token },
+      {
+        headers: {
+          'Cache-Control': 'no-store, max-age=0, must-revalidate',
+        },
+      }
+    );
   } catch (error) {
     console.error('Error generating ElevenLabs token:', error);
     return NextResponse.json(

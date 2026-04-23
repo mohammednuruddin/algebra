@@ -18,7 +18,7 @@ interface TutorShellProps {
   voiceEnabled?: boolean;
   teacherAudioPending?: boolean;
   teacherStopSignal?: number;
-  ttsProvider: 'inworld' | 'elevenlabs';
+  ttsProvider: 'elevenlabs';
   ttsModelId: string;
   teacherVoiceId: string;
   runtimeStatus: 'loading' | 'ready' | 'error';
@@ -119,6 +119,11 @@ export function TutorShell({
   const needsVoiceUnlock = voiceEnabled || speechToTextEnabled;
   const voiceControlsArmed = !needsVoiceUnlock || voiceUnlockRequested;
   const showStartSurface = isPendingStart || isStartingSession;
+  const loadingLabel =
+    isSubmittingTurn &&
+    (snapshot.status === 'preparing' || snapshot.intake?.nextReplyAction === 'prepare_lesson')
+      ? 'Preparing your lesson...'
+      : 'Thinking...';
   const unlockLabel = useMemo(() => {
     if (voiceEnabled && speechToTextEnabled) {
       return 'Enable voice and mic';
@@ -235,6 +240,7 @@ export function TutorShell({
               <TutorSpeech
                 speech={snapshot.speech}
                 thinking={isSubmittingTurn}
+                loadingLabel={loadingLabel}
               />
 
               {activeImage ? (
@@ -322,6 +328,7 @@ export function TutorShell({
                   {showCanvasScene ? (
                     <TutorCanvasHost
                       canvas={snapshot.canvas}
+                      speechRevision={snapshot.speechRevision}
                       disabled={snapshot.status === 'completed'}
                       onMoveToken={onMoveToken}
                       onChooseEquationAnswer={onChooseEquationAnswer}

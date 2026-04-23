@@ -1,49 +1,48 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { resolveDefaultTtsProvider } from './config';
+import { resolveDefaultTtsProvider, resolveTtsRuntimeConfig } from './config';
 
 const originalEnv = {
   TTS_PROVIDER: process.env.TTS_PROVIDER,
   ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
-  INWORLD_API_KEY: process.env.INWORLD_API_KEY,
+  ELEVENLABS_VOICE_ID: process.env.ELEVENLABS_VOICE_ID,
+  ELEVENLABS_MODEL_ID: process.env.ELEVENLABS_MODEL_ID,
 };
 
 afterEach(() => {
   process.env.TTS_PROVIDER = originalEnv.TTS_PROVIDER;
   process.env.ELEVENLABS_API_KEY = originalEnv.ELEVENLABS_API_KEY;
-  process.env.INWORLD_API_KEY = originalEnv.INWORLD_API_KEY;
+  process.env.ELEVENLABS_VOICE_ID = originalEnv.ELEVENLABS_VOICE_ID;
+  process.env.ELEVENLABS_MODEL_ID = originalEnv.ELEVENLABS_MODEL_ID;
 });
 
 describe('resolveDefaultTtsProvider', () => {
-  it('uses inworld by default when both providers are configured', () => {
-    process.env.TTS_PROVIDER = '';
+  it('always resolves to elevenlabs when the runtime is available', () => {
+    process.env.TTS_PROVIDER = 'unsupported-provider';
     process.env.ELEVENLABS_API_KEY = 'elevenlabs-key';
-    process.env.INWORLD_API_KEY = 'inworld-key';
-
-    expect(resolveDefaultTtsProvider()).toBe('inworld');
-  });
-
-  it('honors an explicit inworld provider when both providers are configured', () => {
-    process.env.TTS_PROVIDER = 'inworld';
-    process.env.ELEVENLABS_API_KEY = 'elevenlabs-key';
-    process.env.INWORLD_API_KEY = 'inworld-key';
-
-    expect(resolveDefaultTtsProvider()).toBe('inworld');
-  });
-
-  it('honors an explicit elevenlabs provider when both providers are configured', () => {
-    process.env.TTS_PROVIDER = 'elevenlabs';
-    process.env.ELEVENLABS_API_KEY = 'elevenlabs-key';
-    process.env.INWORLD_API_KEY = 'inworld-key';
 
     expect(resolveDefaultTtsProvider()).toBe('elevenlabs');
   });
 
-  it('uses inworld when it is the only configured provider', () => {
-    process.env.TTS_PROVIDER = 'inworld';
+  it('still falls back to elevenlabs even if no env is configured yet', () => {
+    process.env.TTS_PROVIDER = '';
     process.env.ELEVENLABS_API_KEY = '';
-    process.env.INWORLD_API_KEY = 'inworld-key';
 
-    expect(resolveDefaultTtsProvider()).toBe('inworld');
+    expect(resolveDefaultTtsProvider()).toBe('elevenlabs');
+  });
+});
+
+describe('resolveTtsRuntimeConfig', () => {
+  it('reads the ElevenLabs runtime settings only', () => {
+    process.env.ELEVENLABS_API_KEY = 'elevenlabs-key';
+    process.env.ELEVENLABS_VOICE_ID = 'voice-123';
+    process.env.ELEVENLABS_MODEL_ID = 'eleven_flash_v2_5';
+
+    expect(resolveTtsRuntimeConfig()).toEqual({
+      provider: 'elevenlabs',
+      voiceEnabled: true,
+      teacherVoiceId: 'voice-123',
+      ttsModelId: 'eleven_flash_v2_5',
+    });
   });
 });

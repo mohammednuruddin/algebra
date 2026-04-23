@@ -7,7 +7,8 @@ interface TTSRequest {
   text: string;
   voiceId?: string;
   modelId?: string;
-  provider?: 'inworld' | 'elevenlabs';
+  provider?: 'elevenlabs';
+  optimizeStreamingLatency?: number;
   voiceSettings?: {
     stability?: number;
     similarityBoost?: number;
@@ -26,6 +27,7 @@ async function synthesizeWithElevenLabs(body: Required<Pick<TTSRequest, 'text'>>
   const audioStream = await elevenlabs.textToSpeech.convert(body.voiceId!, {
     text: body.text,
     modelId: body.modelId,
+    optimizeStreamingLatency: body.optimizeStreamingLatency,
     voiceSettings: {
       stability: body.voiceSettings?.stability,
       similarityBoost: body.voiceSettings?.similarityBoost,
@@ -57,45 +59,6 @@ async function synthesizeWithElevenLabs(body: Required<Pick<TTSRequest, 'text'>>
   };
 }
 
-async function synthesizeWithInworld(body: Required<Pick<TTSRequest, 'text'>> & TTSRequest) {
-  const apiKey = process.env.INWORLD_API_KEY;
-  if (!apiKey) {
-    throw new Error('Inworld API key not configured');
-  }
-
-  const response = await fetch('https://api.inworld.ai/tts/v1/voice', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      text: body.text,
-      voiceId: body.voiceId,
-      modelId: body.modelId,
-    }),
-  });
-
-  const payload = (await response.json()) as {
-    audioContent?: string;
-    error?: {
-      message?: string;
-    };
-    message?: string;
-  };
-
-  if (!response.ok || !payload.audioContent) {
-    throw new Error(
-      payload.error?.message || payload.message || `Inworld TTS failed (${response.status})`
-    );
-  }
-
-  return {
-    audioBuffer: Buffer.from(payload.audioContent, 'base64'),
-    contentType: 'audio/mpeg',
-  };
-}
-
 export async function POST(request: NextRequest) {
   try {
     const runtimeConfig = resolveTtsRuntimeConfig();
@@ -112,11 +75,13 @@ export async function POST(request: NextRequest) {
     const provider = coerceTtsProvider(body.provider) || runtimeConfig.provider;
     const voiceId = body.voiceId?.trim() || runtimeConfig.teacherVoiceId;
     const modelId = body.modelId?.trim() || runtimeConfig.ttsModelId;
-
-    const result =
-      provider === 'inworld'
-        ? await synthesizeWithInworld({ ...body, text, voiceId, modelId })
-        : await synthesizeWithElevenLabs({ ...body, text, voiceId, modelId });
+    const result = await synthesizeWithElevenLabs({
+      ...body,
+      text,
+      voiceId,
+      modelId,
+      provider,
+    });
 
     return new NextResponse(result.audioBuffer, {
       headers: {

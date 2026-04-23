@@ -364,43 +364,43 @@ export async function markTutorImageGenerationFailed(
   supabase: TutorImageGenerationJobsClient,
   input: MarkTutorImageGenerationFailedInput
 ) {
-  const updated = input.claimToken
-    ? await updateTutorImageGenerationJobProcessingByToken(
-        supabase,
-        input.predictionId,
-        input.claimToken,
-        {
-          status: 'failed',
-          asset_storage_path: null,
-          asset_url: null,
-          asset_alt_text: null,
-          asset_description: null,
-          asset_metadata_json: null,
-          error_message: input.errorMessage,
-          completed_at: nowIso(),
-          processing_claim_token: null,
-          processing_claimed_at: null,
-          processing_lease_expires_at: null,
-        }
-      )
-    : await jobsTable(supabase)
-        .update({
-          status: 'failed',
-          asset_storage_path: null,
-          asset_url: null,
-          asset_alt_text: null,
-          asset_description: null,
-          asset_metadata_json: null,
-          error_message: input.errorMessage,
-          completed_at: nowIso(),
-          processing_claim_token: null,
-          processing_claimed_at: null,
-          processing_lease_expires_at: null,
-        })
-        .eq('prediction_id', input.predictionId)
-        .in('status', ['queued', 'processing'])
-        .select()
-        .maybeSingle();
+  const failedPatch: Partial<TutorImageGenerationJobRecord> = {
+    status: 'failed',
+    asset_storage_path: null,
+    asset_url: null,
+    asset_alt_text: null,
+    asset_description: null,
+    asset_metadata_json: null,
+    error_message: input.errorMessage,
+    completed_at: nowIso(),
+    processing_claim_token: null,
+    processing_claimed_at: null,
+    processing_lease_expires_at: null,
+  };
+
+  let updated: TutorImageGenerationJobRecord | null;
+
+  if (input.claimToken) {
+    updated = await updateTutorImageGenerationJobProcessingByToken(
+      supabase,
+      input.predictionId,
+      input.claimToken,
+      failedPatch
+    );
+  } else {
+    const response = await jobsTable(supabase)
+      .update(failedPatch)
+      .eq('prediction_id', input.predictionId)
+      .in('status', ['queued', 'processing'])
+      .select()
+      .maybeSingle();
+
+    if (response.error) {
+      throw response.error;
+    }
+
+    updated = response.data;
+  }
 
   if (updated) {
     return updated;

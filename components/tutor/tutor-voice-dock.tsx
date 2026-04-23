@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Mic, MicOff, Square, Keyboard } from 'lucide-react';
 import {
-  ASSEMBLY_STREAM_SAMPLE_RATE,
-  buildAssemblyAiStreamingQuery,
-  resolveAssemblyAiCompletedTranscript,
-  type AssemblyAiTurnMessage,
-} from '@/lib/stt/assemblyai-streaming';
+  ELEVENLABS_SCRIBE_SAMPLE_RATE,
+  buildElevenLabsScribeRealtimeUrl,
+  encodePcm16ChunkToBase64,
+  resolveElevenLabsCommittedTranscript,
+  type ElevenLabsScribeMessage,
+} from '@/lib/stt/elevenlabs-scribe';
 import { appendPcmChunks } from '@/lib/stt/pcm-chunker';
 import { shouldAcceptBargeInTranscript, transcribeVadAudio } from '@/lib/vad/barge-in-transcription';
 import { SileroMicVadController } from '@/lib/vad/silero-mic-vad';
@@ -26,8 +27,6 @@ interface TutorVoiceDockProps {
   onBargeInCommit?: () => void;
   onTextSubmit?: (text: string) => Promise<void> | void;
 }
-
-const STREAM_QUERY = buildAssemblyAiStreamingQuery();
 
 const AUDIO_WORKLET_NAME = 'pcm-capture-processor';
 const AUDIO_WORKLET_SOURCE = `
@@ -57,7 +56,7 @@ function getAudioWorkletModuleUrl() {
 }
 
 function downsampleToInt16(samples: Float32Array, inputSampleRate: number) {
-  if (inputSampleRate === ASSEMBLY_STREAM_SAMPLE_RATE) {
+  if (inputSampleRate === ELEVENLABS_SCRIBE_SAMPLE_RATE) {
     const pcm = new Int16Array(samples.length);
     for (let index = 0; index < samples.length; index += 1) {
       const sample = Math.max(-1, Math.min(1, samples[index] ?? 0));
@@ -66,7 +65,7 @@ function downsampleToInt16(samples: Float32Array, inputSampleRate: number) {
     return pcm;
   }
 
-  const ratio = inputSampleRate / ASSEMBLY_STREAM_SAMPLE_RATE;
+  const ratio = inputSampleRate / ELEVENLABS_SCRIBE_SAMPLE_RATE;
   const outputLength = Math.round(samples.length / ratio);
   const pcm = new Int16Array(outputLength);
   let sourceIndex = 0;
@@ -268,7 +267,6 @@ export function TutorVoiceDock({
     if (websocket) {
       try {
         if (websocket.readyState === WebSocket.OPEN) {
-          websocket.send(JSON.stringify({ type: 'Terminate' }));
           websocket.close();
         } else if (websocket.readyState === WebSocket.CONNECTING) {
           websocket.onopen = () => {
@@ -310,7 +308,7 @@ export function TutorVoiceDock({
     stoppingRef.current = false;
 
     try {
-      const tokenResponse = await fetch('/api/assemblyai/token', { cache: 'no-store' });
+      const tokenResponse = await fetch('/api/elevenlabs/token', { cache: 'no-store' });
       const tokenPayload = (await tokenResponse.json()) as { token?: string; error?: string };
 
       if (!tokenResponse.ok || !tokenPayload.token) {
@@ -338,7 +336,7 @@ export function TutorVoiceDock({
         throw new Error('AudioContext is not available in this browser');
       }
 
-      const audioContext = new AudioContextCtor({ sampleRate: ASSEMBLY_STREAM_SAMPLE_RATE });
+      const audioContext = new AudioContextCtor({ sampleRate: ELEVENLABS_SCRIBE_SAMPLE_RATE });
 
       if (!mountedRef.current || !canAutoListenRef.current || startId !== streamStartIdRef.current) {
         mediaStream.getTracks().forEach((track) => track.stop());
@@ -360,10 +358,7 @@ export function TutorVoiceDock({
       workletNode.connect(gainNode);
       gainNode.connect(audioContext.destination);
 
-      const websocket = new WebSocket(
-        `wss://streaming.assemblyai.com/v3/ws?${STREAM_QUERY.toString()}&token=${encodeURIComponent(tokenPayload.token)}`
-      );
-      websocket.binaryType = 'arraybuffer';
+      const websocket = new WebSocket(buildElevenLabsScribeRealtimeUrl(tokenPayload.token));
 
       clearConnectionTimeout();
       connectionTimeoutRef.current = setTimeout(() => {
@@ -500,7 +495,14 @@ export function TutorVoiceDock({
             : pcm;
         const chunks = appendPcmChunks(pendingPcmSamplesRef.current, outgoingPcm);
         for (const chunk of chunks) {
-          websocket.send(chunk.buffer);
+          websocket.send(
+            JSON.stringify({
+              message_type: 'input_audio_chunk',
+              audio_base_64: encodePcm16ChunkToBase64(chunk),
+              commit: false,
+              sample_rate: ELEVENLABS_SCRIBE_SAMPLE_RATE,
+            })
+          );
         }
       };
 
@@ -527,17 +529,20 @@ export function TutorVoiceDock({
           return;
         }
 
-        const payload = JSON.parse(String(event.data)) as AssemblyAiTurnMessage;
-        if (payload.type !== 'Turn') {
-          return;
-        }
-
-        const nextTranscript = payload.transcript?.trim() || '';
+        const payload = JSON.parse(String(event.data)) as ElevenLabsScribeMessage;
+        const nextTranscript = payload.text?.trim() || '';
         if (nextTranscript) {
           setTranscript(nextTranscript);
         }
 
-        const completedTranscript = resolveAssemblyAiCompletedTranscript(payload);
+        const completedTranscript = resolveElevenLabsCommittedTranscript(payload);
+        if (!completedTranscript && payload.message_type && payload.error) {
+          setError(payload.error);
+          setMicEnabled(false);
+          void stopStreaming('idle');
+          return;
+        }
+
         const activeBargeInId = activeBargeInIdRef.current;
         if (completedTranscript && activeBargeInId !== null) {
           const teacherSpeech = teacherSpeechTextRef.current.trim();

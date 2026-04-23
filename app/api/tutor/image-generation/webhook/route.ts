@@ -304,7 +304,34 @@ export async function POST(request: NextRequest) {
             requestedEdits,
           }),
         });
+        if (claimedJob.source_type === 'edit') {
+          console.log('[tutor:image-edit:success]', {
+            predictionId: payload.id,
+            jobId: claimedJob.id,
+            sourceType: claimedJob.source_type,
+            sourceImageId: claimedJob.source_image_id,
+            sourceImageUrl: claimedJob.source_image_url,
+            prompt: claimedJob.prompt,
+            assetUrl: stored.publicUrl,
+            verifiedEdits: verification
+              ? {
+                  removedLabelsVerified: verification.removedLabelsVerified,
+                  swappedLabelsVerified: verification.swappedLabelsVerified,
+                }
+              : null,
+          });
+        }
       } catch (error) {
+        if (claimedJob.source_type === 'edit') {
+          console.error('[tutor:image-edit:failed]', {
+            predictionId: payload.id,
+            jobId: claimedJob.id,
+            sourceImageId: claimedJob.source_image_id,
+            sourceImageUrl: claimedJob.source_image_url,
+            prompt: claimedJob.prompt,
+            error: error instanceof Error ? error.message : 'Failed to process Replicate webhook',
+          });
+        }
         await markTutorImageGenerationFailed(supabase, {
           predictionId: payload.id,
           claimToken: claimToken ?? null,
@@ -319,6 +346,17 @@ export async function POST(request: NextRequest) {
           : `Replicate prediction ${payload.status}`;
 
       const existingJob = await getTutorImageGenerationJobByPredictionId(supabase, payload.id);
+
+      if (existingJob?.source_type === 'edit') {
+        console.error('[tutor:image-edit:failed]', {
+          predictionId: payload.id,
+          jobId: existingJob.id,
+          sourceImageId: existingJob.source_image_id,
+          sourceImageUrl: existingJob.source_image_url,
+          prompt: existingJob.prompt,
+          error: errorMessage,
+        });
+      }
 
       await markTutorImageGenerationFailed(supabase, {
         predictionId: payload.id,

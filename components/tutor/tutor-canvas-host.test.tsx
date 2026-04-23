@@ -182,6 +182,60 @@ describe('TutorCanvasHost drawing mode', () => {
 
     expect(screen.getByTestId('drawing-disabled')).toHaveTextContent('false');
   });
+
+  it('unlocks a kept drawing task when a new tutor speech turn arrives', () => {
+    const onCanvasSubmit = vi.fn();
+
+    const { rerender } = render(
+      <TutorCanvasHost
+        speechRevision={1}
+        canvas={buildCanvas({
+          mode: 'drawing',
+          drawing: {
+            prompt: 'Circle the shoot.',
+            backgroundImageUrl: 'https://example.com/seed.png',
+            canvasWidth: 800,
+            canvasHeight: 600,
+            brushColor: '#ff3b30',
+            brushSize: 3,
+            submitted: false,
+            sceneRevision: 1,
+          },
+        })}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        onCanvasSubmit={onCanvasSubmit}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /snapshot/i }));
+
+    expect(screen.getByTestId('drawing-disabled')).toHaveTextContent('true');
+
+    rerender(
+      <TutorCanvasHost
+        speechRevision={2}
+        canvas={buildCanvas({
+          mode: 'drawing',
+          drawing: {
+            prompt: 'Circle the shoot.',
+            backgroundImageUrl: 'https://example.com/seed.png',
+            canvasWidth: 800,
+            canvasHeight: 600,
+            brushColor: '#ff3b30',
+            brushSize: 3,
+            submitted: false,
+            sceneRevision: 1,
+          },
+        })}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        onCanvasSubmit={onCanvasSubmit}
+      />
+    );
+
+    expect(screen.getByTestId('drawing-disabled')).toHaveTextContent('false');
+  });
 });
 
 describe('TutorCanvasHost new live tutor canvases', () => {

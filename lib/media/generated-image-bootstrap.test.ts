@@ -4,6 +4,7 @@ const {
   mockBuildOpenRouterRequest,
   mockExtractEditableImageInventory,
   mockCreateAdminClient,
+  mockIsAdminClientConfigured,
   mockCreateTutorImageGenerationJob,
   mockCreateReplicatePrediction,
 } = vi.hoisted(() => ({
@@ -16,6 +17,7 @@ const {
   })),
   mockExtractEditableImageInventory: vi.fn(),
   mockCreateAdminClient: vi.fn(),
+  mockIsAdminClientConfigured: vi.fn(),
   mockCreateTutorImageGenerationJob: vi.fn(),
   mockCreateReplicatePrediction: vi.fn(),
 }));
@@ -30,6 +32,7 @@ vi.mock('@/lib/media/image-analysis', () => ({
 
 vi.mock('@/lib/supabase/admin', () => ({
   createAdminClient: mockCreateAdminClient,
+  isAdminClientConfigured: mockIsAdminClientConfigured,
 }));
 
 vi.mock('@/lib/media/generated-image-jobs', () => ({
@@ -48,6 +51,7 @@ describe('queueTutorGeneratedImages', () => {
     vi.stubGlobal('fetch', vi.fn());
     process.env.REPLICATE_API_TOKEN = 'replicate-token';
     mockCreateAdminClient.mockReturnValue({ from: vi.fn() });
+    mockIsAdminClientConfigured.mockReturnValue(true);
     mockExtractEditableImageInventory.mockResolvedValue({
       summary: 'Plant cell diagram.',
       visibleLabels: ['cell membrane', 'nucleus'],
@@ -60,6 +64,8 @@ describe('queueTutorGeneratedImages', () => {
   });
 
   it('plans and queues generate and edit jobs using image inventories', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -148,5 +154,43 @@ describe('queueTutorGeneratedImages', () => {
         },
       })
     );
+    expect(logSpy).toHaveBeenCalledWith(
+      '[tutor:image-edit:start]',
+      expect.objectContaining({
+        sessionId: 'tutor_123',
+        predictionId: 'pred_edit',
+        sourceImageId: 'img-1',
+        sourceImageUrl: 'https://example.com/original.png',
+        purpose: 'quiz_unlabeled',
+        prompt: expect.any(String),
+      })
+    );
+  });
+
+  it('skips queueing when admin Supabase credentials are unavailable', async () => {
+    mockIsAdminClientConfigured.mockReturnValue(false);
+
+    const queued = await queueTutorGeneratedImages({
+      sessionId: 'tutor_123',
+      topic: 'water cycle',
+      learnerLevel: 'beginner',
+      outline: ['Start with the main cycle.'],
+      imageAssets: [
+        {
+          id: 'img-1',
+          url: 'https://example.com/original.png',
+          altText: 'Water cycle diagram',
+          description: 'Water cycle diagram',
+        },
+      ],
+      origin: 'http://localhost:3000',
+    });
+
+    expect(queued).toEqual([]);
+    expect(mockExtractEditableImageInventory).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+    expect(mockCreateReplicatePrediction).not.toHaveBeenCalled();
+    expect(mockCreateTutorImageGenerationJob).not.toHaveBeenCalled();
   });
 });

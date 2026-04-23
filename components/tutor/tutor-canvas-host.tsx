@@ -23,6 +23,7 @@ import { resolveLessonImageUrl } from '@/lib/media/media-url';
 
 interface TutorCanvasHostProps {
   canvas: TutorCanvasState;
+  speechRevision?: number;
   disabled?: boolean;
   onMoveToken: (tokenId: string, zoneId: string | null) => void;
   onChooseEquationAnswer: (choiceId: string) => void;
@@ -863,10 +864,12 @@ function TextResponseMode({
 
 function DrawingMode({
   canvas,
+  speechRevision,
   disabled,
   onSubmit,
 }: {
   canvas: TutorCanvasState;
+  speechRevision: number;
   disabled: boolean;
   onSubmit?: (mode: string, data: unknown) => void;
 }) {
@@ -878,6 +881,7 @@ function DrawingMode({
     <DrawingScene
       key={sceneKey}
       drawing={dw}
+      speechRevision={speechRevision}
       disabled={disabled}
       onSubmit={onSubmit}
     />
@@ -886,14 +890,16 @@ function DrawingMode({
 
 function DrawingScene({
   drawing,
+  speechRevision,
   disabled,
   onSubmit,
 }: {
   drawing: NonNullable<TutorCanvasState['drawing']>;
+  speechRevision: number;
   disabled: boolean;
   onSubmit?: (mode: string, data: unknown) => void;
 }) {
-  const [submitted, setSubmitted] = useState(false);
+  const [submittedSpeechRevision, setSubmittedSpeechRevision] = useState<number | null>(null);
   const [backgroundImage, setBackgroundImage] = useState<HTMLImageElement | null>(null);
   const [backgroundLoadError, setBackgroundLoadError] = useState(false);
   const resolvedBackgroundUrl = resolveLessonImageUrl(drawing.backgroundImageUrl);
@@ -933,7 +939,7 @@ function DrawingScene({
       canvasHeight: number;
     }
   ) => {
-    setSubmitted(true);
+    setSubmittedSpeechRevision(speechRevision);
     onSubmit?.('drawing', {
       dataUrl,
       overlayDataUrl: metadata?.overlayDataUrl,
@@ -943,6 +949,8 @@ function DrawingScene({
       canvasHeight: metadata?.canvasHeight ?? drawing.canvasHeight,
     });
   };
+
+  const isSubmittedForCurrentSpeech = submittedSpeechRevision === speechRevision;
 
   return (
     <CanvasSection>
@@ -962,7 +970,7 @@ function DrawingScene({
           height={drawing.canvasHeight}
           backgroundImage={resolvedBackgroundUrl ? backgroundImage : null}
           onSnapshot={handleSnapshot}
-          disabled={disabled || submitted}
+          disabled={disabled || isSubmittedForCurrentSpeech}
         />
       </div>
     </CanvasSection>
@@ -973,6 +981,7 @@ function DrawingScene({
 
 export function TutorCanvasHost({
   canvas,
+  speechRevision = 0,
   disabled = false,
   onMoveToken,
   onChooseEquationAnswer,
@@ -1024,7 +1033,14 @@ export function TutorCanvasHost({
   }
 
   if (canvas.mode === 'drawing' && canvas.drawing) {
-    return <DrawingMode canvas={canvas} disabled={disabled} onSubmit={onCanvasSubmit} />;
+    return (
+      <DrawingMode
+        canvas={canvas}
+        speechRevision={speechRevision}
+        disabled={disabled}
+        onSubmit={onCanvasSubmit}
+      />
+    );
   }
 
   if (canvas.mode === 'image_hotspot' && canvas.imageHotspot) {

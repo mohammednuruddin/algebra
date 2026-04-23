@@ -138,6 +138,7 @@ describe('POST /api/tutor/session/create', () => {
       status: 'active',
       topic: null,
       learnerLevel: null,
+      nextReplyAction: 'continue_intake',
     });
     expect(data.snapshot.lessonTopic).toBe('');
   });

@@ -69,7 +69,7 @@ describe('barge-in transcription helpers', () => {
 
     expect(mockEncodeWav).toHaveBeenCalled();
     expect(global.fetch).toHaveBeenCalledWith(
-      '/api/assemblyai/transcribe',
+      '/api/elevenlabs/transcribe',
       expect.objectContaining({
         method: 'POST',
         body: expect.any(FormData),

@@ -451,6 +451,7 @@ export interface TutorIntakeState {
   status: 'active' | 'complete';
   topic: string | null;
   learnerLevel: string | null;
+  nextReplyAction?: 'continue_intake' | 'prepare_lesson';
 }
 
 export interface TutorCanvasEvidence {

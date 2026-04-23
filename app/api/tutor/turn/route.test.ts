@@ -12,6 +12,7 @@ const {
   mockSearchLessonImages,
   mockQueueTutorGeneratedImages,
   mockCreateAdminClient,
+  mockIsAdminClientConfigured,
   mockListCompletedTutorImageAssets,
   mockApplyTutorCommands,
   mockApplyTutorMediaCommands,
@@ -26,6 +27,7 @@ const {
   mockSearchLessonImages: vi.fn(),
   mockQueueTutorGeneratedImages: vi.fn(),
   mockCreateAdminClient: vi.fn(),
+  mockIsAdminClientConfigured: vi.fn(),
   mockListCompletedTutorImageAssets: vi.fn(),
   mockApplyTutorCommands: vi.fn(),
   mockApplyTutorMediaCommands: vi.fn(),
@@ -51,6 +53,7 @@ vi.mock('@/lib/media/generated-image-bootstrap', () => ({
 
 vi.mock('@/lib/supabase/admin', () => ({
   createAdminClient: mockCreateAdminClient,
+  isAdminClientConfigured: mockIsAdminClientConfigured,
 }));
 
 vi.mock('@/lib/media/generated-image-jobs', () => ({
@@ -111,6 +114,7 @@ describe('POST /api/tutor/turn', () => {
     vi.clearAllMocks();
     mockQueueTutorGeneratedImages.mockResolvedValue([]);
     mockCreateAdminClient.mockReturnValue({});
+    mockIsAdminClientConfigured.mockReturnValue(true);
     mockListCompletedTutorImageAssets.mockResolvedValue([]);
     mockCreateEmptyTutorCanvasState.mockReturnValue(emptyCanvas);
     mockCreateTutorSnapshot.mockImplementation(buildSnapshot);
@@ -374,6 +378,74 @@ describe('POST /api/tutor/turn', () => {
     expect(mockGenerateTutorIntakeTurn).toHaveBeenCalledTimes(1);
     expect(data.snapshot.turns).toHaveLength(3);
     expect(data.snapshot.speech).toBe('Tell me the topic you want.');
+    expect(data.snapshot.intake).toEqual({
+      status: 'active',
+      topic: null,
+      learnerLevel: null,
+      nextReplyAction: 'continue_intake',
+    });
+  });
+
+  it('marks the next intake reply as lesson-preparing once the topic is already known', async () => {
+    mockGenerateTutorIntakeTurn.mockResolvedValue({
+      response: {
+        speech: 'Nice. How familiar are you with fractions?',
+        awaitMode: 'voice',
+        readyToStartLesson: false,
+        topic: 'fractions',
+        learnerLevel: null,
+      },
+      debug: {
+        stage: 'turn',
+        messages: [],
+        rawResponseText: null,
+        rawModelContent: null,
+        parsedResponse: null,
+        usedFallback: false,
+        fallbackReason: null,
+      },
+    });
+
+    const request = new NextRequest('http://localhost:3000/api/tutor/turn', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: buildSnapshot({
+          sessionId: 'tutor_2b',
+          prompt: '',
+          lessonTopic: '',
+          learnerLevel: 'unknown',
+          speech: 'What would you like to learn today?',
+          canvas: emptyCanvas,
+          turns: [
+            {
+              actor: 'tutor',
+              text: 'What would you like to learn today?',
+              createdAt: '2026-04-21T00:00:00.000Z',
+            },
+          ],
+          intake: {
+            status: 'active',
+            topic: null,
+            learnerLevel: null,
+          },
+        }),
+        transcript: 'Fractions.',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const response = await POST(request);
+    const data = (await response.json()) as { snapshot: TutorRuntimeSnapshot };
+
+    expect(response.status).toBe(200);
+    expect(data.snapshot.intake).toEqual({
+      status: 'active',
+      topic: 'fractions',
+      learnerLevel: null,
+      nextReplyAction: 'prepare_lesson',
+    });
   });
 
   it('marks the lesson completed when the model ends the live session', async () => {
@@ -508,12 +580,175 @@ describe('POST /api/tutor/turn', () => {
         ]),
       })
     );
+    expect(mockApplyTutorMediaCommands).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaAssets: expect.arrayContaining([
+          expect.objectContaining({ id: 'img-1' }),
+          expect.objectContaining({ id: 'generated_job_1' }),
+        ]),
+      })
+    );
+    expect(mockApplyTutorCommands).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        mediaAssets: expect.arrayContaining([
+          expect.objectContaining({ id: 'img-1' }),
+          expect.objectContaining({ id: 'generated_job_1' }),
+        ]),
+      })
+    );
     expect(data.snapshot.mediaAssets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'img-1' }),
         expect.objectContaining({ id: 'generated_job_1' }),
       ])
     );
+  });
+
+  it('continues the live lesson when generated-image hydration is unavailable', async () => {
+    mockIsAdminClientConfigured.mockReturnValue(false);
+    mockCreateAdminClient.mockImplementation(() => {
+      throw new Error('SUPABASE_SERVICE_ROLE_KEY is not configured');
+    });
+    mockGenerateTutorTurn.mockResolvedValue({
+      response: {
+        speech: 'Alright, let us keep going with the skeletal system.',
+        awaitMode: 'voice',
+        commands: [],
+        sessionComplete: false,
+        status: 'active',
+        canvasAction: 'keep',
+      },
+      debug: {
+        stage: 'turn',
+        messages: [],
+        rawResponseText: null,
+        rawModelContent: null,
+        parsedResponse: null,
+        usedFallback: false,
+        fallbackReason: null,
+      },
+    });
+
+    const request = new NextRequest('http://localhost:3000/api/tutor/turn', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: buildSnapshot({
+          sessionId: 'tutor_5',
+          prompt: 'skeletal system',
+          lessonTopic: 'skeletal system',
+          learnerLevel: 'beginner',
+          lessonOutline: ['Explain what bones do.'],
+          speech: 'Ready to begin?',
+          canvas: emptyCanvas,
+          mediaAssets: [
+            {
+              id: 'img-1',
+              url: 'https://example.com/skeleton.png',
+              altText: 'Skeleton diagram',
+              description: 'Skeleton diagram',
+            },
+          ],
+          intake: null,
+        }),
+        transcript: "Let's get started already.",
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const response = await POST(request);
+    const data = (await response.json()) as { snapshot: TutorRuntimeSnapshot };
+
+    expect(response.status).toBe(200);
+    expect(mockCreateAdminClient).not.toHaveBeenCalled();
+    expect(mockListCompletedTutorImageAssets).not.toHaveBeenCalled();
+    expect(mockGenerateTutorTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageAssets: [
+          expect.objectContaining({
+            id: 'img-1',
+            url: 'https://example.com/skeleton.png',
+          }),
+        ],
+      })
+    );
+    expect(data.snapshot.speech).toBe('Alright, let us keep going with the skeletal system.');
+  });
+
+  it('continues the live lesson when generated-image hydration lookup fails', async () => {
+    mockCreateAdminClient.mockReturnValue({});
+    mockListCompletedTutorImageAssets.mockRejectedValue({
+      code: '42P01',
+      message: 'relation "tutor_image_generation_jobs" does not exist',
+    });
+    mockGenerateTutorTurn.mockResolvedValue({
+      response: {
+        speech: 'Nice, let us keep going.',
+        awaitMode: 'voice',
+        commands: [],
+        sessionComplete: false,
+        status: 'active',
+        canvasAction: 'keep',
+      },
+      debug: {
+        stage: 'turn',
+        messages: [],
+        rawResponseText: null,
+        rawModelContent: null,
+        parsedResponse: null,
+        usedFallback: false,
+        fallbackReason: null,
+      },
+    });
+
+    const request = new NextRequest('http://localhost:3000/api/tutor/turn', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: buildSnapshot({
+          sessionId: 'tutor_6',
+          prompt: 'skeletal system',
+          lessonTopic: 'skeletal system',
+          learnerLevel: 'beginner',
+          lessonOutline: ['Explain what bones do.'],
+          speech: 'Ready to begin?',
+          canvas: emptyCanvas,
+          mediaAssets: [
+            {
+              id: 'img-1',
+              url: 'https://example.com/skeleton.png',
+              altText: 'Skeleton diagram',
+              description: 'Skeleton diagram',
+            },
+          ],
+          intake: null,
+        }),
+        transcript: 'Oh nice.',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const response = await POST(request);
+    const data = (await response.json()) as { snapshot: TutorRuntimeSnapshot };
+
+    expect(response.status).toBe(200);
+    expect(mockCreateAdminClient).toHaveBeenCalledTimes(1);
+    expect(mockListCompletedTutorImageAssets).toHaveBeenCalledWith({}, 'tutor_6');
+    expect(mockGenerateTutorTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageAssets: [
+          expect.objectContaining({
+            id: 'img-1',
+            url: 'https://example.com/skeleton.png',
+          }),
+        ],
+      })
+    );
+    expect(data.snapshot.speech).toBe('Nice, let us keep going.');
   });
 
   it('forwards canvas evidence and logs the learner transcript on live turns', async () => {

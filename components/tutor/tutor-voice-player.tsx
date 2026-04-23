@@ -7,7 +7,7 @@ const TTS_REQUEST_TIMEOUT_MS = 15000;
 interface TutorVoicePlayerProps {
   text: string;
   voiceId: string;
-  provider: 'inworld' | 'elevenlabs';
+  provider: 'elevenlabs';
   modelId: string;
   enabled: boolean;
   playToken: number;

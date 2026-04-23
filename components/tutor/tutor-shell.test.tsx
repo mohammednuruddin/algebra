@@ -22,7 +22,15 @@ vi.mock('@/components/tutor/tutor-canvas-host', () => ({
 }));
 
 vi.mock('@/components/tutor/tutor-speech', () => ({
-  TutorSpeech: ({ speech }: { speech: string }) => <div>{speech}</div>,
+  TutorSpeech: ({
+    speech,
+    thinking,
+    loadingLabel,
+  }: {
+    speech: string;
+    thinking?: boolean;
+    loadingLabel?: string;
+  }) => <div>{thinking ? loadingLabel || 'Thinking...' : speech}</div>,
 }));
 
 vi.mock('@/components/tutor/tutor-voice-dock', () => ({
@@ -83,7 +91,7 @@ describe('TutorShell', () => {
         speechToTextEnabled={false}
         voiceEnabled={false}
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -106,7 +114,7 @@ describe('TutorShell', () => {
         speechToTextEnabled
         voiceEnabled
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -133,7 +141,7 @@ describe('TutorShell', () => {
         voiceEnabled
         teacherAudioPending
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -161,7 +169,7 @@ describe('TutorShell', () => {
         speechToTextEnabled
         voiceEnabled
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -186,7 +194,7 @@ describe('TutorShell', () => {
         speechToTextEnabled
         voiceEnabled
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -214,7 +222,7 @@ describe('TutorShell', () => {
         speechToTextEnabled
         voiceEnabled
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -237,6 +245,36 @@ describe('TutorShell', () => {
     );
   });
 
+  it('shows lesson preparation copy during the intake handoff turn', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot({
+          intake: {
+            status: 'active',
+            topic: 'fractions',
+            learnerLevel: null,
+            nextReplyAction: 'prepare_lesson',
+          } as TutorRuntimeSnapshot['intake'],
+        })}
+        isSubmittingTurn
+        speechToTextEnabled={false}
+        voiceEnabled={false}
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_flash_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking={false}
+        onTeacherSpeakingChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Preparing your lesson...')).toBeInTheDocument();
+    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+  });
+
   it('pauses tutor playback during provisional barge-in and resumes it when rejected', () => {
     render(
       <TutorShell
@@ -244,7 +282,7 @@ describe('TutorShell', () => {
         speechToTextEnabled
         voiceEnabled
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -288,7 +326,7 @@ describe('TutorShell', () => {
         speechToTextEnabled={false}
         voiceEnabled={false}
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -320,7 +358,7 @@ describe('TutorShell', () => {
         speechToTextEnabled={false}
         voiceEnabled={false}
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -365,7 +403,7 @@ describe('TutorShell', () => {
         speechToTextEnabled={false}
         voiceEnabled={false}
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -412,7 +450,7 @@ describe('TutorShell', () => {
         speechToTextEnabled={false}
         voiceEnabled={false}
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}
@@ -448,7 +486,7 @@ describe('TutorShell', () => {
         speechToTextEnabled={false}
         voiceEnabled={false}
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
         runtimeStatus="ready"
         onTranscript={vi.fn()}

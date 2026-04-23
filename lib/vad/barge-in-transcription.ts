@@ -166,7 +166,7 @@ export async function transcribeVadAudio(audio: Float32Array) {
   const formData = new FormData();
   formData.append('audio', blob, 'barge-in.wav');
 
-  const response = await fetch('/api/assemblyai/transcribe', {
+  const response = await fetch('/api/elevenlabs/transcribe', {
     method: 'POST',
     body: formData,
   });

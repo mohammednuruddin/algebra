@@ -43,16 +43,16 @@ const loadingPendingSnapshot = createPendingSnapshot(
 type RuntimeConfig = {
   voiceEnabled: boolean;
   teacherVoiceId: string;
-  ttsProvider: 'inworld' | 'elevenlabs';
+  ttsProvider: 'elevenlabs';
   ttsModelId: string;
   speechToTextEnabled: boolean;
 };
 
 const defaultRuntimeConfig: RuntimeConfig = {
   voiceEnabled: false,
-  teacherVoiceId: 'Ashley',
-  ttsProvider: 'inworld',
-  ttsModelId: 'inworld-tts-1.5-mini',
+  teacherVoiceId: 'hpp4J3VqNfWAUOO0d1Us',
+  ttsProvider: 'elevenlabs',
+  ttsModelId: 'eleven_flash_v2_5',
   speechToTextEnabled: false,
 };
 
@@ -500,8 +500,7 @@ export function TutorExperience({
           voiceEnabled: Boolean(config.voiceEnabled),
           teacherVoiceId:
             config.teacherVoiceId || defaultRuntimeConfig.teacherVoiceId,
-          ttsProvider:
-            config.ttsProvider === 'elevenlabs' ? 'elevenlabs' : 'inworld',
+          ttsProvider: 'elevenlabs',
           ttsModelId: config.ttsModelId || defaultRuntimeConfig.ttsModelId,
           speechToTextEnabled: Boolean(config.speechToTextEnabled),
         });

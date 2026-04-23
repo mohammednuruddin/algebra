@@ -422,6 +422,8 @@ describe('POST /api/tutor/image-generation/webhook', () => {
   });
 
   it('downloads, stores, describes, and verifies an edit image before completing the job', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
     const rawBody = JSON.stringify({
       id: 'pred_456',
       status: 'succeeded',
@@ -545,7 +547,72 @@ describe('POST /api/tutor/image-generation/webhook', () => {
         }),
       })
     );
+    expect(logSpy).toHaveBeenCalledWith(
+      '[tutor:image-edit:success]',
+      expect.objectContaining({
+        predictionId: 'pred_456',
+        jobId: 'job_2',
+        sourceImageId: 'generated_1',
+        sourceImageUrl: 'https://example.com/original.png',
+        assetUrl: 'https://supabase.example/stored-path',
+        verifiedEdits: {
+          removedLabelsVerified: ['nucleus'],
+          swappedLabelsVerified: [{ from: 'evaporation', to: 'condensation' }],
+        },
+      })
+    );
     expect(mockMarkFailed).not.toHaveBeenCalled();
+  });
+
+  it('logs terminal edit prediction failures with the source image and prompt context', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const rawBody = JSON.stringify({
+      id: 'pred_edit_failed',
+      status: 'failed',
+      error: 'Replicate rejected the request',
+    });
+    const webhookTimestamp = '1710000000';
+    const webhookId = 'msg_edit_failed';
+    const webhookSignature = `v1,${buildSignedBody({
+      webhookId,
+      webhookTimestamp,
+      rawBody,
+      secret: String(process.env.REPLICATE_WEBHOOK_SECRET),
+    })}`;
+
+    mockGetJobByPredictionId.mockResolvedValue(
+      buildClaimedJob({
+        id: 'job_failed',
+        prediction_id: 'pred_edit_failed',
+        source_type: 'edit',
+        purpose: 'quiz_unlabeled',
+        prompt: "Remove label 'nucleus'",
+        source_image_id: 'generated_1',
+        source_image_url: 'https://example.com/original.png',
+      })
+    );
+
+    const response = await POST(
+      buildRequest({
+        body: rawBody,
+        webhookId,
+        webhookTimestamp,
+        webhookSignature,
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[tutor:image-edit:failed]',
+      expect.objectContaining({
+        predictionId: 'pred_edit_failed',
+        jobId: 'job_failed',
+        sourceImageId: 'generated_1',
+        sourceImageUrl: 'https://example.com/original.png',
+        prompt: "Remove label 'nucleus'",
+        error: 'Replicate rejected the request',
+      })
+    );
   });
 
   it('fails an edit webhook before storage when requested edits are malformed', async () => {

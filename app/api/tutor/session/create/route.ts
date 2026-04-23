@@ -8,6 +8,7 @@ import {
   generateLessonPreparation,
   generateTutorIntakeTurn,
 } from '@/lib/tutor/model';
+import { getTutorIntakeNextReplyAction } from '@/lib/tutor/intake-state';
 import {
   applyTutorCommands,
   applyTutorMediaCommands,
@@ -69,6 +70,10 @@ export async function POST(request: NextRequest) {
           status: 'active',
           topic: intakeResult.response.topic,
           learnerLevel: intakeResult.response.learnerLevel,
+          nextReplyAction: getTutorIntakeNextReplyAction({
+            topic: intakeResult.response.topic,
+            learnerLevel: intakeResult.response.learnerLevel,
+          }),
         },
         continuation: null,
         status: 'active',

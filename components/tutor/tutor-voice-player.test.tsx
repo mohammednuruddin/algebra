@@ -59,7 +59,7 @@ describe('TutorVoicePlayer', () => {
         text="Hello there"
         voiceId="voice-1"
         provider="elevenlabs"
-        modelId="eleven_turbo_v2_5"
+        modelId="eleven_flash_v2_5"
         enabled
         playToken={1}
         onStart={onStart}
@@ -90,7 +90,7 @@ describe('TutorVoicePlayer', () => {
         text="Hello there"
         voiceId="voice-1"
         provider="elevenlabs"
-        modelId="eleven_turbo_v2_5"
+        modelId="eleven_flash_v2_5"
         enabled
         playToken={1}
         onRequestStart={onRequestStart}
@@ -128,7 +128,7 @@ describe('TutorVoicePlayer', () => {
         text="Hello there"
         voiceId="voice-1"
         provider="elevenlabs"
-        modelId="eleven_turbo_v2_5"
+        modelId="eleven_flash_v2_5"
         enabled
         playToken={1}
         onError={onError}
@@ -149,7 +149,7 @@ describe('TutorVoicePlayer', () => {
         text="Hello there"
         voiceId="voice-1"
         provider="elevenlabs"
-        modelId="eleven_turbo_v2_5"
+        modelId="eleven_flash_v2_5"
         enabled
         playToken={1}
         stopSignal={0}
@@ -168,7 +168,7 @@ describe('TutorVoicePlayer', () => {
         text="Hello there"
         voiceId="voice-1"
         provider="elevenlabs"
-        modelId="eleven_turbo_v2_5"
+        modelId="eleven_flash_v2_5"
         enabled
         playToken={1}
         stopSignal={1}
@@ -186,7 +186,7 @@ describe('TutorVoicePlayer', () => {
         text="Hello there"
         voiceId="voice-1"
         provider="elevenlabs"
-        modelId="eleven_turbo_v2_5"
+        modelId="eleven_flash_v2_5"
         enabled
         playToken={1}
         paused={false}
@@ -204,7 +204,7 @@ describe('TutorVoicePlayer', () => {
         text="Hello there"
         voiceId="voice-1"
         provider="elevenlabs"
-        modelId="eleven_turbo_v2_5"
+        modelId="eleven_flash_v2_5"
         enabled
         playToken={1}
         paused
@@ -218,7 +218,7 @@ describe('TutorVoicePlayer', () => {
         text="Hello there"
         voiceId="voice-1"
         provider="elevenlabs"
-        modelId="eleven_turbo_v2_5"
+        modelId="eleven_flash_v2_5"
         enabled
         playToken={1}
         paused={false}

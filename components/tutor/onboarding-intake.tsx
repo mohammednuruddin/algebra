@@ -16,7 +16,7 @@ interface OnboardingIntakeProps {
   speechToTextEnabled?: boolean;
   runtimeStatus: 'loading' | 'ready' | 'error';
   voiceEnabled?: boolean;
-  ttsProvider: 'inworld' | 'elevenlabs';
+  ttsProvider: 'elevenlabs';
   ttsModelId: string;
   teacherVoiceId: string;
 }

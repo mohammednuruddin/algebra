@@ -3,13 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queueTutorGeneratedImages } from '@/lib/media/generated-image-bootstrap';
 import { listCompletedTutorImageAssets } from '@/lib/media/generated-image-jobs';
 import { searchLessonImages } from '@/lib/media/lesson-image-search';
-import { createAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient, isAdminClientConfigured } from '@/lib/supabase/admin';
 import {
   generateInitialTutorResponse,
   generateLessonPreparation,
   generateTutorIntakeTurn,
   generateTutorTurn,
 } from '@/lib/tutor/model';
+import { getTutorIntakeNextReplyAction } from '@/lib/tutor/intake-state';
 import {
   buildTutorCanvasStateContext,
   buildTutorLatestLearnerTurnContext,
@@ -257,6 +258,10 @@ export async function POST(request: NextRequest) {
           status: 'active',
           topic: intakeResult.response.topic || snapshot.intake?.topic || null,
           learnerLevel: nextLearnerLevel,
+          nextReplyAction: getTutorIntakeNextReplyAction({
+            topic: intakeResult.response.topic || snapshot.intake?.topic || null,
+            learnerLevel: nextLearnerLevel,
+          }),
         },
         continuation: null,
         status: 'active',
@@ -276,10 +281,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const hydratedMediaAssets = mergeMediaAssets(
-      snapshot.mediaAssets,
-      await listCompletedTutorImageAssets(createAdminClient(), snapshot.sessionId)
-    );
+    let hydratedGeneratedAssets: TutorMediaAsset[] = [];
+    if (isAdminClientConfigured()) {
+      try {
+        hydratedGeneratedAssets = await listCompletedTutorImageAssets(
+          createAdminClient(),
+          snapshot.sessionId
+        );
+      } catch (hydrationError) {
+        console.error('[tutor:image-hydration] Failed to load generated tutor assets', {
+          sessionId: snapshot.sessionId,
+          error:
+            hydrationError instanceof Error
+              ? hydrationError.message
+              : typeof hydrationError === 'string'
+                ? hydrationError
+                : JSON.stringify(hydrationError),
+        });
+      }
+    }
+    const hydratedMediaAssets = mergeMediaAssets(snapshot.mediaAssets, hydratedGeneratedAssets);
 
     const modelResult = await generateTutorTurn({
       topic: snapshot.lessonTopic,
@@ -309,12 +330,12 @@ export async function POST(request: NextRequest) {
 
     const activeImageId = applyTutorMediaCommands({
       currentActiveImageId: snapshot.activeImageId,
-      mediaAssets: snapshot.mediaAssets,
+      mediaAssets: hydratedMediaAssets,
       commands: modelResult.response.commands,
     });
     const applied = applyTutorCommands(snapshot.canvas, modelResult.response.commands, {
       canvasAction: modelResult.response.canvasAction,
-      mediaAssets: snapshot.mediaAssets,
+      mediaAssets: hydratedMediaAssets,
       defaultImageId: activeImageId,
     });
     const turns = [

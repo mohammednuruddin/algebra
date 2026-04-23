@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest --run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "setup": "cp -n .env.example .env.local || echo '.env.local already exists'"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.3",

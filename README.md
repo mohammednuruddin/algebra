@@ -2,7 +2,27 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+### Quick Setup
+
+For detailed setup instructions, see [SETUP.md](SETUP.md).
+
+### Environment Setup
+
+1. Copy the environment template:
+```bash
+npm run setup
+# or manually: cp .env.example .env.local
+```
+
+2. Fill in your API keys in `.env.local`:
+   - **Required**: Supabase credentials, OpenRouter API key
+   - **Optional**: ElevenLabs (voice), Replicate (image generation), Serper (image search)
+
+See `.env.example` for detailed configuration options.
+
+### Development Server
+
+Run the development server:
 
 ```bash
 npm run dev
@@ -32,6 +52,49 @@ Required env vars:
 - `NEXT_PUBLIC_SUPABASE_URL`
 
 Implementation notes live in [docs/2026-04-23-live-tutor-image-generation.md](/Users/nuru/sanchrobytes/algebra/docs/2026-04-23-live-tutor-image-generation.md).
+
+## Environment Variables
+
+The platform requires several API keys for full functionality. See `.env.example` for a complete list.
+
+### Core Services
+
+| Service | Purpose | Required |
+|---------|---------|----------|
+| **Supabase** | Database, storage, auth | ✅ Yes |
+| **OpenRouter** | AI models (tutor, vision) | ✅ Yes |
+| **ElevenLabs** | Voice (TTS + STT) | Optional |
+| **Replicate** | Image generation | Optional |
+| **Serper** | Image search | Optional |
+
+### Quick Setup
+
+```bash
+# Copy the template
+cp .env.example .env.local
+
+# Edit with your keys
+nano .env.local
+```
+
+**Minimum configuration** (text-only mode):
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+OPENROUTER_API_KEY=your-openrouter-key
+```
+
+**Full configuration** (all features):
+```env
+# Add the above, plus:
+ELEVENLABS_API_KEY=your-elevenlabs-key
+REPLICATE_API_TOKEN=your-replicate-token
+REPLICATE_WEBHOOK_SECRET=whsec_your-webhook-secret
+SERPER_API_KEY=your-serper-key
+```
+
+See `.env.example` for detailed documentation of each variable.
 
 ## Learn More
 

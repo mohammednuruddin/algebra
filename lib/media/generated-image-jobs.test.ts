@@ -542,6 +542,27 @@ describe('generated-image-jobs', () => {
     expect(failed?.status).toBe('failed');
   });
 
+  it('returns the failed row when failing a queued job without a processing lease', async () => {
+    const supabase = createSupabaseMock({
+      updateRow: {
+        id: 'job_1',
+        session_id: 'tutor_123',
+        prediction_id: 'pred_123',
+        status: 'failed',
+        error_message: 'Replicate rejected the request',
+      },
+    });
+
+    const failed = await markTutorImageGenerationFailed(supabase, {
+      predictionId: 'pred_123',
+      errorMessage: 'Replicate rejected the request',
+    });
+
+    expect(supabase.updateEq).toHaveBeenCalledWith('prediction_id', 'pred_123');
+    expect(supabase.updateIn).toHaveBeenCalledWith('status', ['queued', 'processing']);
+    expect(failed?.status).toBe('failed');
+  });
+
   it('does not rewrite a job that is already completed', async () => {
     const supabase = createSupabaseMock({
       updateRow: null,

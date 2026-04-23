@@ -5,8 +5,7 @@ import { resolveTtsRuntimeConfig } from '@/lib/tts/config';
 export const fetchCache = 'force-no-store';
 
 export async function GET() {
-  const assemblyAiKey =
-    process.env.ASSEMBLYAI_API_KEY || process.env.ASSEMBLY_AI_KEY;
+  const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
   const ttsConfig = resolveTtsRuntimeConfig();
 
   return NextResponse.json(
@@ -15,7 +14,7 @@ export async function GET() {
       teacherVoiceId: ttsConfig.teacherVoiceId,
       ttsProvider: ttsConfig.provider,
       ttsModelId: ttsConfig.ttsModelId,
-      speechToTextEnabled: Boolean(assemblyAiKey),
+      speechToTextEnabled: Boolean(elevenLabsKey),
       imageSearchEnabled: Boolean(process.env.SERPER_API_KEY),
       checkedAt: new Date().toISOString(),
     },

@@ -36,7 +36,7 @@ describe('OnboardingIntake', () => {
         speechToTextEnabled
         voiceEnabled
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
       />
     );
@@ -58,7 +58,7 @@ describe('OnboardingIntake', () => {
         speechToTextEnabled
         voiceEnabled
         ttsProvider="elevenlabs"
-        ttsModelId="eleven_turbo_v2_5"
+        ttsModelId="eleven_flash_v2_5"
         teacherVoiceId="voice-1"
       />
     );

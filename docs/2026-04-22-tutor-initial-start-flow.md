@@ -20,6 +20,7 @@ The flow was redesigned to provide a more engaging and user-controlled onboardin
    - The `startSession()` call is fired directly from the click handler instead of a follow-up effect.
    - The lessons history sidebar still remains visible, but the app stays on the same centered start surface while the first intake turn loads.
    - Instead of swapping to a full-screen prep screen or prematurely revealing the live tutor panes, the shell shows an in-context loading message: "Starting your live tutor. One sec..."
+   - Once the tutor is already live, later wait states must use a thinking label rather than lesson-preparation wording so the UI stays truthful about what phase the learner is in.
    - TTS playback and STT streaming stay suppressed during this startup placeholder, so the first spoken line the learner hears is the actual tutor intake question.
    - Once the backend responds, the session begins with the tutor initiating the intake phase (asking for the topic) and utilizing the already-unlocked audio capabilities.
 5. **Persistent Sidebar Preference**:

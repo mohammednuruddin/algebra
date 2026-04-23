@@ -232,7 +232,7 @@ describe('generateTutorTurn', () => {
     vi.stubGlobal('fetch', vi.fn());
   });
 
-  it('teaches the live tutor which canvas to pick and to avoid pushy hype', async () => {
+  it('teaches the live tutor to use drawing for image-pointing tasks and to avoid pushy hype', async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -280,9 +280,8 @@ describe('generateTutorTurn', () => {
     const outbound = vi.mocked(buildOpenRouterRequest).mock.calls.at(-1)?.[0];
     const systemPrompt = String(outbound?.messages?.[0]?.content ?? '');
 
-    expect(systemPrompt).toMatch(
-      /image_hotspot|timeline|continuous_axis|venn_diagram|token_builder|process_flow/i
-    );
+    expect(systemPrompt).toMatch(/set_drawing|timeline|continuous_axis|venn_diagram|token_builder|process_flow/i);
+    expect(systemPrompt).not.toMatch(/image_hotspot|set_image_hotspot/i);
     expect(systemPrompt).toMatch(/avoid repetitive hype|let's go/i);
   });
 

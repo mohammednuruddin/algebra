@@ -21,6 +21,7 @@ import {
   getGuestArticle,
   getGuestContinuationContextByArticleId,
 } from '@/lib/guest/guest-lesson-store';
+import { ArticleReader } from '@/components/lesson/article-reader';
 
 interface ArticleViewerProps {
   article: LessonArticleRecord;
@@ -172,6 +173,7 @@ export function ArticleViewer({ article, continueHref = null }: ArticleViewerPro
                 <ArrowRight className="w-4 h-4" />
               </Link>
             ) : null}
+            <ArticleReader markdown={article.article_markdown} title={article.title} />
             <button
               onClick={handleShareLink}
               className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full transition-colors"

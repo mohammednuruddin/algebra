@@ -125,7 +125,7 @@ describe('TutorVoiceDock', () => {
 
     await Promise.resolve();
 
-    expect(fetch).toHaveBeenCalledWith('/api/assemblyai/token', { cache: 'no-store' });
+    expect(fetch).toHaveBeenCalledWith('/api/elevenlabs/token', { cache: 'no-store' });
   });
 
   it('keeps the STT transport warm while tutor audio is still pending', async () => {
@@ -140,7 +140,7 @@ describe('TutorVoiceDock', () => {
 
     await Promise.resolve();
 
-    expect(fetch).toHaveBeenCalledWith('/api/assemblyai/token', { cache: 'no-store' });
+    expect(fetch).toHaveBeenCalledWith('/api/elevenlabs/token', { cache: 'no-store' });
   });
 
   it('syncs tutor-speaking state into the Silero VAD controller', () => {
@@ -173,7 +173,7 @@ describe('TutorVoiceDock', () => {
 
   it('uses the live streaming transcript for barge-in instead of the slow batch transcription route', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/api/assemblyai/token') {
+      if (String(input) === '/api/elevenlabs/token') {
         return new Response(JSON.stringify({ token: 'test-token' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -215,9 +215,8 @@ describe('TutorVoiceDock', () => {
 
     await socket?.onmessage?.({
       data: JSON.stringify({
-        type: 'Turn',
-        transcript: 'wait can you repeat that',
-        end_of_turn: true,
+        message_type: 'committed_transcript',
+        text: 'wait can you repeat that',
       }),
     });
 
@@ -227,9 +226,9 @@ describe('TutorVoiceDock', () => {
 
     expect(onBargeInStart).toHaveBeenCalledTimes(1);
     expect(onBargeInCommit).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith('/api/assemblyai/token', { cache: 'no-store' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/elevenlabs/token', { cache: 'no-store' });
     expect(fetchMock).not.toHaveBeenCalledWith(
-      '/api/assemblyai/transcribe',
+      '/api/elevenlabs/transcribe',
       expect.anything()
     );
     expect(capturedSpeechEnd).toBeDefined();
@@ -238,7 +237,7 @@ describe('TutorVoiceDock', () => {
   it('does not submit the same barge-in twice when websocket transcription beats the fallback route', async () => {
     let resolveTranscribeResponse: ((value: Response) => void) | null = null;
     const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      if (String(input) === '/api/assemblyai/token') {
+      if (String(input) === '/api/elevenlabs/token') {
         return Promise.resolve(
           new Response(JSON.stringify({ token: 'test-token' }), {
             status: 200,
@@ -280,9 +279,8 @@ describe('TutorVoiceDock', () => {
 
     await socket?.onmessage?.({
       data: JSON.stringify({
-        type: 'Turn',
-        transcript: 'wait can you repeat that',
-        end_of_turn: true,
+        message_type: 'committed_transcript',
+        text: 'wait can you repeat that',
       }),
     });
 

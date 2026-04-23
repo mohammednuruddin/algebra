@@ -1,5 +1,5 @@
 import { buildOpenRouterRequest } from '@/lib/ai/openrouter';
-import { createAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient, isAdminClientConfigured } from '@/lib/supabase/admin';
 import { buildQuizVariantPrompt } from '@/lib/media/generated-image-prompts';
 import { createTutorImageGenerationJob } from '@/lib/media/generated-image-jobs';
 import { createReplicatePrediction } from '@/lib/media/generated-image-replicate';
@@ -186,7 +186,7 @@ export async function queueTutorGeneratedImages(args: {
   imageAssets: TutorMediaAsset[];
   origin: string;
 }) {
-  if (!process.env.REPLICATE_API_TOKEN) {
+  if (!process.env.REPLICATE_API_TOKEN || !isAdminClientConfigured()) {
     return [];
   }
 
@@ -244,6 +244,14 @@ export async function queueTutorGeneratedImages(args: {
         prompt,
         inputImages: [sourceImage.url],
         webhookUrl,
+      });
+      console.log('[tutor:image-edit:start]', {
+        sessionId: args.sessionId,
+        predictionId: prediction.id,
+        sourceImageId: sourceImage.id,
+        sourceImageUrl: sourceImage.url,
+        purpose: job.purpose,
+        prompt,
       });
 
       return await createTutorImageGenerationJob(supabase, {

@@ -39,7 +39,7 @@ export function VoiceInput({
         const formData = new FormData();
         formData.append('audio', blob, 'learner-turn.wav');
 
-        const response = await fetch('/api/assemblyai/transcribe', {
+        const response = await fetch('/api/elevenlabs/transcribe', {
           method: 'POST',
           body: formData,
         });
