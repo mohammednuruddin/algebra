@@ -1,5 +1,9 @@
-import { buildOpenRouterRequest } from '@/lib/ai/openrouter';
 import type { TutorMediaAsset } from '@/lib/types/tutor';
+
+import {
+  describeTeachingImage,
+  type TeachingImageDescription,
+} from './image-analysis';
 
 type SerperImageResult = {
   title?: string;
@@ -17,32 +21,14 @@ type SerperResponse = {
   images?: SerperImageResult[];
 };
 
-type ImageDescription = {
-  summary: string;
-  imageKind: string;
-  showsProcess: boolean;
-  keyObjects: string[];
-  keyRegions: string[];
-  teachingValueScore: number;
-  childFriendlinessScore: number;
-  clutterScore: number;
-  suggestedUse: string;
-  tutorGuidance: string[];
-};
-
-function safeJsonParse<T>(value: string): T {
-  return JSON.parse(value.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim()) as T;
-}
-
-function previewJsonForLogs(content: string, limit = 1200) {
-  return content.length > limit ? `${content.slice(0, limit)}...` : content;
-}
-
 function supportsVisionDescription(imageUrl: string) {
   return !/\.svg(\?|$)/i.test(imageUrl);
 }
 
-function buildFallbackDescription(candidate: SerperImageResult, topic: string): ImageDescription {
+function buildFallbackDescription(
+  candidate: SerperImageResult,
+  topic: string
+): TeachingImageDescription {
   const title = candidate.title || `${topic} diagram`;
 
   return {
@@ -57,78 +43,6 @@ function buildFallbackDescription(candidate: SerperImageResult, topic: string): 
     suggestedUse: 'Use as a visual reference while explaining the main parts.',
     tutorGuidance: ['Point out the main labeled parts on the image.'],
   };
-}
-
-async function describeImage(imageUrl: string, topic: string) {
-  const model = process.env.OPENROUTER_IMAGE_MODEL || 'google/gemini-2.5-flash-lite';
-  const prompt =
-    `Describe this image for a tutor teaching ${topic}. ` +
-    'Return strict JSON only with keys summary,imageKind,showsProcess,keyObjects,keyRegions,teachingValueScore,childFriendlinessScore,clutterScore,suggestedUse,tutorGuidance. ' +
-    'Keep arrays short and concise. keyRegions must be short phrases, not coordinate objects. tutorGuidance must be short action prompts the tutor can say.';
-
-  const outbound = buildOpenRouterRequest({
-    model,
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are helping an educational tutor understand a teaching image. Return strict JSON only.',
-      },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: prompt },
-          {
-            type: 'image_url',
-            image_url: {
-              url: imageUrl,
-              detail: 'auto',
-            },
-          },
-        ],
-      },
-    ],
-    response_format: { type: 'json_object' },
-    max_tokens: 500,
-    temperature: 0,
-  });
-
-  const response = await fetch(outbound.url, {
-    method: 'POST',
-    headers: outbound.headers,
-    body: JSON.stringify(outbound.body),
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenRouter image description failed with status ${response.status}`);
-  }
-
-  const payload = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: string;
-      };
-    }>;
-  };
-  const content = payload.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error('OpenRouter image description returned no content');
-  }
-
-  const parse = (value: string) => safeJsonParse<ImageDescription>(value);
-
-  try {
-    return parse(content);
-  } catch (error) {
-    console.error('[lesson/image-search] Failed to parse image description JSON', {
-      topic,
-      imageUrl,
-      error: error instanceof Error ? error.message : String(error),
-      preview: previewJsonForLogs(content),
-    });
-    throw error;
-  }
 }
 
 async function fetchSerperImages(query: string) {
@@ -180,7 +94,8 @@ export async function searchLessonImages(input: {
   const searchQuery = input.searchQuery?.trim() || topic;
   const serper = await fetchSerperImages(searchQuery);
   const candidates = filterImageCandidates(serper.images || []);
-  const described: Array<{ candidate: SerperImageResult; description: ImageDescription }> = [];
+  const described: Array<{ candidate: SerperImageResult; description: TeachingImageDescription }> =
+    [];
 
   for (const candidate of candidates) {
     if (!supportsVisionDescription(candidate.imageUrl!)) {
@@ -192,7 +107,10 @@ export async function searchLessonImages(input: {
     }
 
     try {
-      const description = await describeImage(candidate.imageUrl!, topic);
+      const description = await describeTeachingImage({
+        imageUrl: candidate.imageUrl!,
+        topic,
+      });
       described.push({ candidate, description });
     } catch (error) {
       console.warn('[lesson/image-search] Image description failed', {
