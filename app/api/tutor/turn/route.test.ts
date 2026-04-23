@@ -10,6 +10,7 @@ const {
   mockGenerateInitialTutorResponse,
   mockGenerateTutorTurn,
   mockSearchLessonImages,
+  mockQueueTutorGeneratedImages,
   mockApplyTutorCommands,
   mockApplyTutorMediaCommands,
   mockCreateEmptyTutorCanvasState,
@@ -21,6 +22,7 @@ const {
   mockGenerateInitialTutorResponse: vi.fn(),
   mockGenerateTutorTurn: vi.fn(),
   mockSearchLessonImages: vi.fn(),
+  mockQueueTutorGeneratedImages: vi.fn(),
   mockApplyTutorCommands: vi.fn(),
   mockApplyTutorMediaCommands: vi.fn(),
   mockCreateEmptyTutorCanvasState: vi.fn(),
@@ -37,6 +39,10 @@ vi.mock('@/lib/tutor/model', () => ({
 
 vi.mock('@/lib/media/lesson-image-search', () => ({
   searchLessonImages: mockSearchLessonImages,
+}));
+
+vi.mock('@/lib/media/generated-image-bootstrap', () => ({
+  queueTutorGeneratedImages: mockQueueTutorGeneratedImages,
 }));
 
 vi.mock('@/lib/tutor/runtime', () => ({
@@ -91,6 +97,7 @@ function buildSnapshot(
 describe('POST /api/tutor/turn', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockQueueTutorGeneratedImages.mockResolvedValue([]);
     mockCreateEmptyTutorCanvasState.mockReturnValue(emptyCanvas);
     mockCreateTutorSnapshot.mockImplementation(buildSnapshot);
     mockApplyTutorCommands.mockReturnValue({ canvas: emptyCanvas, sessionComplete: false });
@@ -186,6 +193,112 @@ describe('POST /api/tutor/turn', () => {
     expect(data.snapshot.lessonTopic).toBe('linear equations');
     expect(data.snapshot.intake).toBeNull();
     expect(data.snapshot.speech).toBe('Let us start with one-step linear equations.');
+  });
+
+  it('queues generated images in the background when intake hands off into a real lesson', async () => {
+    const timeout = Symbol('timeout');
+    mockGenerateTutorIntakeTurn.mockResolvedValue({
+      response: {
+        speech: 'Great, let us get started.',
+        awaitMode: 'voice',
+        readyToStartLesson: true,
+        topic: 'linear equations',
+        learnerLevel: 'needs the basics',
+      },
+      debug: {
+        stage: 'turn',
+        messages: [],
+        rawResponseText: null,
+        rawModelContent: null,
+        parsedResponse: null,
+        usedFallback: false,
+        fallbackReason: null,
+      },
+    });
+    mockGenerateLessonPreparation.mockResolvedValue({
+      openingSpeech: 'I am preparing linear equations now.',
+      outline: ['Start with one-step equations.'],
+      imageSearchQuery: 'linear equations teaching diagram',
+      desiredImageCount: 1,
+    });
+    mockSearchLessonImages.mockResolvedValue({
+      assets: [
+        {
+          id: 'img-1',
+          url: 'https://example.com/equation.png',
+          altText: 'Equation diagram',
+          description: 'Equation diagram',
+        },
+      ],
+    });
+    mockGenerateInitialTutorResponse.mockResolvedValue({
+      response: {
+        speech: 'Let us start with one-step linear equations.',
+        awaitMode: 'voice_or_canvas',
+        commands: [],
+        sessionComplete: false,
+        status: 'active',
+        canvasAction: 'keep',
+      },
+      debug: {
+        stage: 'session_create',
+        messages: [],
+        rawResponseText: null,
+        rawModelContent: null,
+        parsedResponse: null,
+        usedFallback: false,
+        fallbackReason: null,
+      },
+    });
+    mockQueueTutorGeneratedImages.mockReturnValue(new Promise(() => undefined));
+
+    const request = new NextRequest('http://localhost:3000/api/tutor/turn', {
+      method: 'POST',
+      body: JSON.stringify({
+        snapshot: buildSnapshot({
+          sessionId: 'tutor_1',
+          prompt: '',
+          lessonTopic: '',
+          learnerLevel: 'unknown',
+          speech: 'What would you like to learn today?',
+          canvas: emptyCanvas,
+          turns: [
+            {
+              actor: 'tutor',
+              text: 'What would you like to learn today?',
+              createdAt: '2026-04-21T00:00:00.000Z',
+            },
+          ],
+          intake: {
+            status: 'active',
+            topic: null,
+            learnerLevel: null,
+          },
+        }),
+        transcript: 'I want to learn linear equations.',
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const raced = await Promise.race([
+      POST(request),
+      new Promise<typeof timeout>((resolve) => {
+        setTimeout(() => resolve(timeout), 25);
+      }),
+    ]);
+
+    expect(raced).not.toBe(timeout);
+    expect(mockQueueTutorGeneratedImages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'tutor_1',
+        topic: 'linear equations',
+        learnerLevel: 'needs the basics',
+        outline: ['Start with one-step equations.'],
+        origin: 'http://localhost:3000',
+      })
+    );
   });
 
   it('forwards short or filler-like intake speech instead of swallowing it in the route', async () => {

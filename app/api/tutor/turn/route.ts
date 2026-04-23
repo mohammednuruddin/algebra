@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { queueTutorGeneratedImages } from '@/lib/media/generated-image-bootstrap';
 import { searchLessonImages } from '@/lib/media/lesson-image-search';
 import {
   generateInitialTutorResponse,
@@ -125,6 +126,22 @@ export async function POST(request: NextRequest) {
           searchQuery: preparation.imageSearchQuery,
           desiredCount: preparation.desiredImageCount,
         });
+
+        void queueTutorGeneratedImages({
+          sessionId: snapshot.sessionId,
+          topic: nextTopic,
+          learnerLevel: nextLearnerLevel,
+          outline: preparation.outline,
+          imageAssets: imageSearchResult.assets,
+          origin: new URL(request.url).origin,
+        }).catch((queueError) => {
+          console.error('[tutor:image-bootstrap] Failed to queue generated images during intake handoff', {
+            sessionId: snapshot.sessionId,
+            topic: nextTopic,
+            error: queueError instanceof Error ? queueError.message : String(queueError),
+          });
+        });
+
         const modelResult = await generateInitialTutorResponse({
           topic: nextTopic,
           learnerLevel: nextLearnerLevel,

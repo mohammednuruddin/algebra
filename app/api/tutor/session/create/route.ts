@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 
+import { queueTutorGeneratedImages } from '@/lib/media/generated-image-bootstrap';
 import { searchLessonImages } from '@/lib/media/lesson-image-search';
 import {
   generateInitialTutorResponse,
@@ -102,6 +103,22 @@ export async function POST(request: NextRequest) {
               desiredCount: preparation.desiredImageCount,
             })
           ).assets;
+
+    void queueTutorGeneratedImages({
+      sessionId,
+      topic,
+      learnerLevel,
+      outline: preparation.outline,
+      imageAssets,
+      origin: new URL(request.url).origin,
+    }).catch((queueError) => {
+      console.error('[tutor:image-bootstrap] Failed to queue generated images during session create', {
+        sessionId,
+        topic,
+        error: queueError instanceof Error ? queueError.message : String(queueError),
+      });
+    });
+
     const modelResult = await generateInitialTutorResponse({
       topic,
       learnerLevel,
