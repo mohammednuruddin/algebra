@@ -109,7 +109,11 @@ export interface TutorImageGenerationJobRecord {
   status: TutorImageGenerationJobStatus;
   prompt: string;
   source_image_id: string | null;
+  source_image_url: string | null;
   requested_edits_json: Record<string, unknown> | null;
+  processing_claim_token: string | null;
+  processing_claimed_at: string | null;
+  processing_lease_expires_at: string | null;
   asset_storage_path: string | null;
   asset_url: string | null;
   asset_alt_text: string | null;
@@ -123,7 +127,11 @@ export interface TutorImageGenerationJobRecord {
 
 type TutorImageGenerationJobOptionalColumns =
   | 'source_image_id'
+  | 'source_image_url'
   | 'requested_edits_json'
+  | 'processing_claim_token'
+  | 'processing_claimed_at'
+  | 'processing_lease_expires_at'
   | 'asset_storage_path'
   | 'asset_url'
   | 'asset_alt_text'
