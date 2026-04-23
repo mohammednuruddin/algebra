@@ -371,6 +371,111 @@ export function TutorVoiceDock({
         void stopStreaming('idle');
       }, 8000);
 
+      // Cold starts can open or fail the socket before Silero finishes booting.
+      websocket.onopen = () => {
+        clearConnectionTimeout();
+        if (!mountedRef.current || stoppingRef.current) {
+          try {
+            websocket.close();
+          } catch {
+            // noop
+          }
+          return;
+        }
+        setStreamingState('listening');
+      };
+
+      websocket.onmessage = async (event) => {
+        if (!mountedRef.current) {
+          return;
+        }
+
+        // Drop transcripts while live STT is intentionally suppressed.
+        if (sttSuppressedRef.current || teacherAudioPendingRef.current) {
+          return;
+        }
+
+        const payload = JSON.parse(String(event.data)) as ElevenLabsScribeMessage;
+        const nextTranscript = payload.text?.trim() || '';
+        if (nextTranscript) {
+          setTranscript(nextTranscript);
+        }
+
+        const completedTranscript = resolveElevenLabsCommittedTranscript(payload);
+        if (!completedTranscript && payload.message_type && payload.error) {
+          setError(payload.error);
+          setMicEnabled(false);
+          void stopStreaming('idle');
+          return;
+        }
+
+        const activeBargeInId = activeBargeInIdRef.current;
+        if (completedTranscript && activeBargeInId !== null) {
+          const teacherSpeech = teacherSpeechTextRef.current.trim();
+
+          if (!shouldAcceptBargeInTranscript(completedTranscript, teacherSpeech)) {
+            if (activeBargeInIdRef.current === activeBargeInId) {
+              activeBargeInIdRef.current = null;
+              if (teacherSpeakingRef.current) {
+                sttSuppressedRef.current = true;
+              }
+              setTranscript('');
+              onBargeInCancelRef.current?.();
+            }
+            return;
+          }
+
+          if (activeBargeInIdRef.current === activeBargeInId) {
+            activeBargeInIdRef.current = null;
+            sttSuppressedRef.current = false;
+            onBargeInCommitRef.current?.();
+            setStreamingState('processing');
+            setTranscript('');
+            await onTranscriptRef.current(completedTranscript);
+            if (mountedRef.current && canAutoListenRef.current && !stoppingRef.current) {
+              setStreamingState('listening');
+            }
+          }
+          return;
+        }
+
+        if (completedTranscript) {
+          if (ignoreNextCompletedTranscriptRef.current) {
+            ignoreNextCompletedTranscriptRef.current = false;
+            return;
+          }
+
+          setStreamingState('processing');
+          setTranscript('');
+          await onTranscriptRef.current(completedTranscript);
+          if (mountedRef.current && canAutoListenRef.current && !stoppingRef.current) {
+            setStreamingState('listening');
+          }
+        }
+      };
+
+      websocket.onerror = (event) => {
+        clearConnectionTimeout();
+        if (!mountedRef.current) {
+          return;
+        }
+        console.error('WebSocket error:', event);
+        setError('Listening connection failed. Tap the mic to retry.');
+        setMicEnabled(false);
+        void stopStreaming('idle');
+      };
+
+      websocket.onclose = (event) => {
+        clearConnectionTimeout();
+        if (!mountedRef.current || stoppingRef.current) {
+          return;
+        }
+        console.error('WebSocket closed:', { code: event.code, reason: event.reason, wasClean: event.wasClean });
+        setError((current) => current || `Microphone connection closed (${event.code}). Tap the mic to retry.`);
+        setMicEnabled(false);
+        void stopStreaming('idle');
+      };
+
       mediaStreamRef.current = mediaStream;
       audioContextRef.current = audioContext;
       sourceNodeRef.current = sourceNode;
@@ -504,110 +609,6 @@ export function TutorVoiceDock({
             })
           );
         }
-      };
-
-      websocket.onopen = () => {
-        clearConnectionTimeout();
-        if (!mountedRef.current || stoppingRef.current) {
-          try {
-            websocket.close();
-          } catch {
-            // noop
-          }
-          return;
-        }
-        setStreamingState('listening');
-      };
-
-      websocket.onmessage = async (event) => {
-        if (!mountedRef.current) {
-          return;
-        }
-
-        // Drop transcripts while live STT is intentionally suppressed.
-        if (sttSuppressedRef.current || teacherAudioPendingRef.current) {
-          return;
-        }
-
-        const payload = JSON.parse(String(event.data)) as ElevenLabsScribeMessage;
-        const nextTranscript = payload.text?.trim() || '';
-        if (nextTranscript) {
-          setTranscript(nextTranscript);
-        }
-
-        const completedTranscript = resolveElevenLabsCommittedTranscript(payload);
-        if (!completedTranscript && payload.message_type && payload.error) {
-          setError(payload.error);
-          setMicEnabled(false);
-          void stopStreaming('idle');
-          return;
-        }
-
-        const activeBargeInId = activeBargeInIdRef.current;
-        if (completedTranscript && activeBargeInId !== null) {
-          const teacherSpeech = teacherSpeechTextRef.current.trim();
-
-          if (!shouldAcceptBargeInTranscript(completedTranscript, teacherSpeech)) {
-            if (activeBargeInIdRef.current === activeBargeInId) {
-              activeBargeInIdRef.current = null;
-              if (teacherSpeakingRef.current) {
-                sttSuppressedRef.current = true;
-              }
-              setTranscript('');
-              onBargeInCancelRef.current?.();
-            }
-            return;
-          }
-
-          if (activeBargeInIdRef.current === activeBargeInId) {
-            activeBargeInIdRef.current = null;
-            sttSuppressedRef.current = false;
-            onBargeInCommitRef.current?.();
-            setStreamingState('processing');
-            setTranscript('');
-            await onTranscriptRef.current(completedTranscript);
-            if (mountedRef.current && canAutoListenRef.current && !stoppingRef.current) {
-              setStreamingState('listening');
-            }
-          }
-          return;
-        }
-
-        if (completedTranscript) {
-          if (ignoreNextCompletedTranscriptRef.current) {
-            ignoreNextCompletedTranscriptRef.current = false;
-            return;
-          }
-
-          setStreamingState('processing');
-          setTranscript('');
-          await onTranscriptRef.current(completedTranscript);
-          if (mountedRef.current && canAutoListenRef.current && !stoppingRef.current) {
-            setStreamingState('listening');
-          }
-        }
-      };
-
-      websocket.onerror = (event) => {
-        clearConnectionTimeout();
-        if (!mountedRef.current) {
-          return;
-        }
-        console.error('WebSocket error:', event);
-        setError('Listening connection failed. Tap the mic to retry.');
-        setMicEnabled(false);
-        void stopStreaming('idle');
-      };
-
-      websocket.onclose = (event) => {
-        clearConnectionTimeout();
-        if (!mountedRef.current || stoppingRef.current) {
-          return;
-        }
-        console.error('WebSocket closed:', { code: event.code, reason: event.reason, wasClean: event.wasClean });
-        setError((current) => current || `Microphone connection closed (${event.code}). Tap the mic to retry.`);
-        setMicEnabled(false);
-        void stopStreaming('idle');
       };
     } catch (streamError) {
       clearConnectionTimeout();

@@ -1,6 +1,6 @@
 'use client';
 
-import { render, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TutorVoiceDock } from './tutor-voice-dock';
@@ -11,12 +11,15 @@ const mockSileroDestroy = vi.fn();
 const mockSileroSetTeacherSpeaking = vi.fn();
 let capturedSpeechStart: (() => void) | undefined;
 let capturedSpeechEnd: ((audio: Float32Array) => void | Promise<void>) | undefined;
+let deferSileroStart = false;
+let resolveDeferredSileroStart: (() => void) | null = null;
 
 class MockWebSocket {
   static instances: MockWebSocket[] = [];
   static OPEN = 1;
   static CONNECTING = 0;
   static CLOSED = 3;
+  static autoOpenOnConstruct = false;
 
   readyState = MockWebSocket.CONNECTING;
   binaryType = 'arraybuffer';
@@ -27,6 +30,11 @@ class MockWebSocket {
 
   constructor(public readonly url: string) {
     MockWebSocket.instances.push(this);
+    if (MockWebSocket.autoOpenOnConstruct) {
+      queueMicrotask(() => {
+        this.open();
+      });
+    }
   }
 
   send = vi.fn();
@@ -80,6 +88,11 @@ vi.mock('@/lib/vad/silero-mic-vad', () => ({
       mockSileroStart();
       capturedSpeechStart = onSpeechStart;
       capturedSpeechEnd = onSpeechEnd;
+      if (deferSileroStart) {
+        await new Promise<void>((resolve) => {
+          resolveDeferredSileroStart = resolve;
+        });
+      }
     });
     pause = mockSileroPause;
     destroy = mockSileroDestroy;
@@ -92,7 +105,10 @@ describe('TutorVoiceDock', () => {
     vi.clearAllMocks();
     capturedSpeechStart = undefined;
     capturedSpeechEnd = undefined;
+    deferSileroStart = false;
+    resolveDeferredSileroStart = null;
     MockWebSocket.instances = [];
+    MockWebSocket.autoOpenOnConstruct = false;
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {
       // Intentionally unresolved: the test only cares whether auto-connect starts.
     })));
@@ -305,5 +321,57 @@ describe('TutorVoiceDock', () => {
 
     expect(onTranscript).toHaveBeenCalledTimes(1);
     expect(onBargeInCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('survives a cold-start websocket open that happens before Silero finishes booting', async () => {
+    vi.useFakeTimers();
+
+    try {
+      deferSileroStart = true;
+      MockWebSocket.autoOpenOnConstruct = true;
+
+      const fetchMock = vi.fn(async () =>
+        new Response(JSON.stringify({ token: 'test-token' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(
+        <TutorVoiceDock
+          runtimeStatus="ready"
+          speechToTextEnabled
+          onTranscript={vi.fn()}
+        />
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(MockWebSocket.instances).toHaveLength(1);
+
+      await act(async () => {
+        resolveDeferredSileroStart?.();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(8000);
+        await Promise.resolve();
+      });
+
+      expect(screen.getByText('Listening...')).toBeInTheDocument();
+      expect(
+        screen.queryByText('Microphone connection timed out. Tap the mic to retry.')
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
