@@ -304,6 +304,16 @@ export async function POST(request: NextRequest) {
             requestedEdits,
           }),
         });
+        console.log('[tutor:image-gen:success]', {
+          predictionId: payload.id,
+          jobId: claimedJob.id,
+          sourceType: claimedJob.source_type,
+          purpose: claimedJob.purpose,
+          sourceImageId: claimedJob.source_image_id,
+          sourceImageUrl: claimedJob.source_image_url,
+          prompt: claimedJob.prompt,
+          assetUrl: stored.publicUrl,
+        });
         if (claimedJob.source_type === 'edit') {
           console.log('[tutor:image-edit:success]', {
             predictionId: payload.id,
@@ -322,6 +332,16 @@ export async function POST(request: NextRequest) {
           });
         }
       } catch (error) {
+        console.error('[tutor:image-gen:failed]', {
+          predictionId: payload.id,
+          jobId: claimedJob.id,
+          sourceType: claimedJob.source_type,
+          purpose: claimedJob.purpose,
+          sourceImageId: claimedJob.source_image_id,
+          sourceImageUrl: claimedJob.source_image_url,
+          prompt: claimedJob.prompt,
+          error: error instanceof Error ? error.message : 'Failed to process Replicate webhook',
+        });
         if (claimedJob.source_type === 'edit') {
           console.error('[tutor:image-edit:failed]', {
             predictionId: payload.id,
@@ -346,6 +366,19 @@ export async function POST(request: NextRequest) {
           : `Replicate prediction ${payload.status}`;
 
       const existingJob = await getTutorImageGenerationJobByPredictionId(supabase, payload.id);
+
+      if (existingJob) {
+        console.error('[tutor:image-gen:failed]', {
+          predictionId: payload.id,
+          jobId: existingJob.id,
+          sourceType: existingJob.source_type,
+          purpose: existingJob.purpose,
+          sourceImageId: existingJob.source_image_id,
+          sourceImageUrl: existingJob.source_image_url,
+          prompt: existingJob.prompt,
+          error: errorMessage,
+        });
+      }
 
       if (existingJob?.source_type === 'edit') {
         console.error('[tutor:image-edit:failed]', {

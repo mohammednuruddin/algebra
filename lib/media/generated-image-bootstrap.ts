@@ -26,6 +26,70 @@ type TutorImagePlanJob =
       actions: TutorGeneratedImageEdits;
     };
 
+function buildFallbackGeneratePrompt(args: {
+  topic: string;
+  learnerLevel: string;
+  outline: string[];
+}) {
+  const focus = args.outline.find((step) => step.trim().length > 0) ?? args.topic;
+  return `Clear educational diagram of ${args.topic} for a ${args.learnerLevel} learner. Focus on ${focus}.`;
+}
+
+function ensureTutorImagePlanHasAtLeastOneJob(args: {
+  topic: string;
+  learnerLevel: string;
+  outline: string[];
+  imageAssets: TutorMediaAsset[];
+  editableInventories: EditableInventoryContext[];
+  jobs: TutorImagePlanJob[];
+}) {
+  if (args.jobs.length > 0 || args.imageAssets.length === 0) {
+    return {
+      jobs: args.jobs,
+      fallbackApplied: false,
+    };
+  }
+
+  const editableInventory = args.editableInventories.find(
+    (inventory) =>
+      inventory.visibleLabels.length > 0 &&
+      args.imageAssets.some((asset) => asset.id === inventory.imageId)
+  );
+
+  if (editableInventory) {
+    return {
+      jobs: [
+        {
+          kind: 'edit_variant' as const,
+          purpose: 'quiz_unlabeled' as const,
+          sourceImageId: editableInventory.imageId,
+          actions: {
+            remove: [editableInventory.visibleLabels[0]],
+            swap: [],
+          },
+        },
+      ],
+      fallbackApplied: true,
+    };
+  }
+
+  return {
+    jobs: [
+      {
+        kind: 'generate_new' as const,
+        purpose: 'teaching_visual' as const,
+        prompt: buildFallbackGeneratePrompt({
+          topic: args.topic,
+          learnerLevel: args.learnerLevel,
+          outline: args.outline,
+        }),
+        aspectRatio: '1:1' as const,
+      },
+    ],
+    fallbackApplied: true,
+  };
+}
+
 function safeJsonParse<T>(value: string) {
   return JSON.parse(value.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim()) as T;
 }
@@ -148,8 +212,8 @@ async function generateTutorImagePlan(args: {
       },
     ],
     response_format: { type: 'json_object' },
-    temperature: 0.3,
-    max_tokens: 1200,
+    temperature: 0.7,
+    max_tokens: 8200,
   });
 
   const response = await fetch(outbound.url, {
@@ -200,7 +264,7 @@ export async function queueTutorGeneratedImages(args: {
     }))
   );
 
-  const jobs = await generateTutorImagePlan({
+  const plannedJobs = await generateTutorImagePlan({
     topic: args.topic,
     learnerLevel: args.learnerLevel,
     outline: args.outline,
@@ -210,6 +274,38 @@ export async function queueTutorGeneratedImages(args: {
       visibleLabels: inventory.visibleLabels,
       keyItems: inventory.keyItems,
     })),
+  });
+  const { jobs, fallbackApplied } = ensureTutorImagePlanHasAtLeastOneJob({
+    topic: args.topic,
+    learnerLevel: args.learnerLevel,
+    outline: args.outline,
+    imageAssets: args.imageAssets,
+    editableInventories: editableInventories.map((inventory) => ({
+      imageId: inventory.imageId,
+      visibleLabels: inventory.visibleLabels,
+      keyItems: inventory.keyItems,
+    })),
+    jobs: plannedJobs,
+  });
+  console.log('[tutor:image-gen:plan]', {
+    sessionId: args.sessionId,
+    topic: args.topic,
+    plannerJobCount: plannedJobs.length,
+    plannedJobCount: jobs.length,
+    fallbackApplied,
+    jobs: jobs.map((job) =>
+      job.kind === 'generate_new'
+        ? {
+            kind: job.kind,
+            purpose: job.purpose,
+            prompt: job.prompt,
+          }
+        : {
+            kind: job.kind,
+            purpose: job.purpose,
+            sourceImageId: job.sourceImageId,
+          }
+    ),
   });
   const supabase = createAdminClient();
   const webhookUrl = `${args.origin}/api/tutor/image-generation/webhook`;
@@ -222,6 +318,13 @@ export async function queueTutorGeneratedImages(args: {
           prompt: job.prompt,
           aspectRatio: job.aspectRatio,
           webhookUrl,
+        });
+        console.log('[tutor:image-gen:start]', {
+          sessionId: args.sessionId,
+          predictionId: prediction.id,
+          sourceType: 'generate',
+          purpose: job.purpose,
+          prompt: job.prompt,
         });
 
         return await createTutorImageGenerationJob(supabase, {
@@ -245,6 +348,15 @@ export async function queueTutorGeneratedImages(args: {
         inputImages: [sourceImage.url],
         webhookUrl,
       });
+      console.log('[tutor:image-gen:start]', {
+        sessionId: args.sessionId,
+        predictionId: prediction.id,
+        sourceType: 'edit',
+        purpose: job.purpose,
+        sourceImageId: sourceImage.id,
+        sourceImageUrl: sourceImage.url,
+        prompt,
+      });
       console.log('[tutor:image-edit:start]', {
         sessionId: args.sessionId,
         predictionId: prediction.id,
@@ -266,6 +378,35 @@ export async function queueTutorGeneratedImages(args: {
       });
     })
   );
+
+  queued.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      const job = jobs[index];
+      console.error('[tutor:image-gen:queue-failed]', {
+        sessionId: args.sessionId,
+        job:
+          job?.kind === 'generate_new'
+            ? {
+                kind: job.kind,
+                purpose: job.purpose,
+                prompt: job.prompt,
+              }
+            : job
+              ? {
+                  kind: job.kind,
+                  purpose: job.purpose,
+                  sourceImageId: job.sourceImageId,
+                }
+              : null,
+        error:
+          result.reason instanceof Error
+            ? result.reason.message
+            : typeof result.reason === 'string'
+              ? result.reason
+              : JSON.stringify(result.reason),
+      });
+    }
+  });
 
   return queued.flatMap((result) =>
     result.status === 'fulfilled' && result.value != null ? [result.value] : []

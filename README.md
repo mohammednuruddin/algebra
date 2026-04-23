@@ -1,4 +1,26 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Teaching Platform
+
+An interactive, voice-first teaching platform that provides personalized lessons on any topic. Built with Next.js, Supabase, and powered by AI agents for lesson planning, teaching, and multimodal interactions.
+
+## Features
+
+- **Voice-First Learning**: Natural voice interactions with automatic turn detection using ElevenLabs
+- **Multimodal Input**: Respond using voice, text, canvas drawing, or image annotation
+- **Interactive Canvas**: 28+ canvas modes including drawing, graphing, code execution, and image generation
+- **Lesson Planning**: AI-generated structured lesson plans with milestones and progress tracking
+- **Visual Learning**: Automatic image search and generation for concepts
+- **Article Generation**: Completed lessons saved as comprehensive markdown articles with images and formulas
+- **Lesson History**: Personal knowledge library with search and PDF export
+- **Guest Mode**: Try the platform immediately without authentication
+- **Read Aloud**: Listen to saved articles with text-to-speech
+
+## Tech Stack
+
+- **Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS
+- **Backend**: Supabase (PostgreSQL, Storage, Auth, Edge Functions)
+- **AI**: OpenRouter (GPT-4, Claude), ElevenLabs (TTS/STT)
+- **Media**: Replicate (image generation), Serper (image search)
+- **Canvas**: Pyodide (Python execution), Monaco Editor (code), KaTeX (math)
 
 ## Getting Started
 
@@ -36,22 +58,29 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Open [http://localhost:3000](http://localhost:3000) to start learning.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Project Structure
 
-## Live Tutor Media
+```
+app/                    # Next.js app router pages
+├── api/               # API routes (AI chat, ElevenLabs, lesson management)
+├── lessons/           # Lesson UI (history, articles)
+└── page.tsx           # Main tutor interface
 
-Background tutor image generation and quiz-variant editing use Replicate webhooks plus Supabase storage.
+components/
+├── lesson/            # Core lesson components (canvas, voice, input)
+└── tutor/             # Tutor experience components
 
-Required env vars:
+lib/
+├── ai/                # AI agent implementations
+├── canvas/            # Canvas modes and tools
+├── stt/               # Speech-to-text (ElevenLabs Scribe)
+├── tts/               # Text-to-speech (ElevenLabs)
+└── types/             # TypeScript definitions
 
-- `REPLICATE_API_TOKEN`
-- `REPLICATE_WEBHOOK_SECRET`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `NEXT_PUBLIC_SUPABASE_URL`
-
-Implementation notes live in [docs/2026-04-23-live-tutor-image-generation.md](/Users/nuru/sanchrobytes/algebra/docs/2026-04-23-live-tutor-image-generation.md).
+.kiro/specs/           # Project documentation and tasks
+```
 
 ## Environment Variables
 
@@ -96,6 +125,42 @@ SERPER_API_KEY=your-serper-key
 
 See `.env.example` for detailed documentation of each variable.
 
+## Key Features Explained
+
+### Voice Interaction
+- Uses ElevenLabs Eleven Flash v2.5 for fast, natural TTS
+- Browser-based voice activity detection with Silero VAD
+- Automatic turn detection and barge-in support
+- ElevenLabs Scribe for real-time speech-to-text
+
+### Canvas Modes
+The platform includes 28+ interactive canvas modes:
+- **Drawing**: Freehand, shapes, annotations
+- **Math**: Graphing calculator, equation solver, geometry
+- **Code**: Python execution (Pyodide), code editor (Monaco)
+- **Media**: Image generation (Replicate), image analysis
+- **Interactive**: Quizzes, flashcards, timelines, mind maps
+
+### Lesson Flow
+1. **Planning**: AI generates structured lesson plan with milestones
+2. **Media Prep**: Searches/generates relevant images and diagrams
+3. **Teaching**: Interactive turns with voice, text, and canvas
+4. **Progress**: Real-time milestone tracking
+5. **Summary**: Generates comprehensive article with all content
+
+### Article System
+- Markdown format with embedded images and LaTeX formulas
+- Searchable lesson history with thumbnails
+- PDF export and shareable links
+- Read-aloud feature for accessibility
+
+## Documentation
+
+- [SETUP.md](SETUP.md) - Detailed setup instructions
+- [.kiro/specs/ai-teaching-platform/requirements.md](.kiro/specs/ai-teaching-platform/requirements.md) - Full requirements
+- [.kiro/specs/ai-teaching-platform/design.md](.kiro/specs/ai-teaching-platform/design.md) - System design
+- [.kiro/specs/ai-teaching-platform/tasks.md](.kiro/specs/ai-teaching-platform/tasks.md) - Development tasks
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
@@ -108,5 +173,7 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 ## Deploy on Vercel
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+This app now includes the Vercel Web Analytics client. After deploying, enable Web Analytics for the project in the Vercel dashboard to see visits and unique visitors.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.

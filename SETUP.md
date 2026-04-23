@@ -269,5 +269,6 @@ For production deployment:
 4. Set up Replicate webhooks with public URL
 5. Enable Supabase RLS policies
 6. Review security settings for all services
+7. Enable Web Analytics in the Vercel dashboard to see visits and unique visitors for this app
 
 See deployment documentation for platform-specific guides (Vercel, Railway, etc.).

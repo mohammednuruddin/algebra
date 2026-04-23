@@ -1,0 +1,119 @@
+<h2>Live Tutor Canvas Wave 1</h2>
+<p class="subtitle">Balanced primitives first. Diagram-heavy + reasoning-heavy. Click any cards that feel strongest or most off.</p>
+
+<div class="section">
+  <div class="label">Recommendation</div>
+  <div class="mockup">
+    <div class="mockup-header">Wave 1: core live-tutor workspaces</div>
+    <div class="mockup-body" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;">
+      <div class="card" data-choice="image_hotspot" onclick="toggleSelect(this)">
+        <div class="card-body">
+          <h3>Image Hotspot</h3>
+          <p>Tap exact regions on a diagram, map, circuit, body part, or labeled figure.</p>
+          <p><strong>Subjects:</strong> biology, geography, anatomy, physics, geometry</p>
+          <p><strong>Lively:</strong> glow target, tutor highlight pulse, near-miss feedback, reveal labels after submit</p>
+        </div>
+      </div>
+
+      <div class="card" data-choice="timeline" onclick="toggleSelect(this)">
+        <div class="card-body">
+          <h3>Timeline Builder</h3>
+          <p>Drag events, stages, or milestones onto a chronological or ordered axis.</p>
+          <p><strong>Subjects:</strong> history, literature, evolution, scientific procedures, civics</p>
+          <p><strong>Lively:</strong> snap-to-era lanes, before/after hints, tutor scrubbing through sequence</p>
+        </div>
+      </div>
+
+      <div class="card" data-choice="continuous_axis" onclick="toggleSelect(this)">
+        <div class="card-body">
+          <h3>Continuous Axis</h3>
+          <p>Place a value, estimate, or example along a line or 2-point spectrum.</p>
+          <p><strong>Subjects:</strong> physics, statistics, geography climate bands, tone, confidence, economics</p>
+          <p><strong>Lively:</strong> live formula preview, shaded ranges, tutor nudges toward precision</p>
+        </div>
+      </div>
+
+      <div class="card" data-choice="venn_diagram" onclick="toggleSelect(this)">
+        <div class="card-body">
+          <h3>Venn Diagram</h3>
+          <p>Drag ideas or examples into shared and non-shared set regions.</p>
+          <p><strong>Subjects:</strong> logic, compare/contrast, classification, grammar, civics</p>
+          <p><strong>Lively:</strong> overlap glow, partial-credit grouping, tutor probes on why something belongs in the middle</p>
+        </div>
+      </div>
+
+      <div class="card" data-choice="token_builder" onclick="toggleSelect(this)">
+        <div class="card-body">
+          <h3>Token Builder</h3>
+          <p>Assemble expressions, equations, statements, or structured phrases from pieces.</p>
+          <p><strong>Subjects:</strong> algebra, chemistry equations, grammar, logic, code reasoning</p>
+          <p><strong>Lively:</strong> slots magnetize, syntax-validity hints, tutor reads the construction aloud</p>
+        </div>
+      </div>
+
+      <div class="card" data-choice="process_flow" onclick="toggleSelect(this)">
+        <div class="card-body">
+          <h3>Process Flow</h3>
+          <p>Build a chain, cycle, or branch of causes, steps, and outputs.</p>
+          <p><strong>Subjects:</strong> biology, chemistry, history causality, writing structure, economics</p>
+          <p><strong>Lively:</strong> arrows animate on submit, tutor traces the path, branch mistakes become visible</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Wave 2</div>
+  <div class="options" data-multiselect>
+    <div class="option" data-choice="part_whole_builder" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Part-Whole Builder</h3>
+        <p>Fractions, percentages, ratios, probability, mixtures.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="map_canvas" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Map Canvas</h3>
+        <p>Pins, regions, routes, climate and trade overlays.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="claim_evidence_builder" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>Claim-Evidence Builder</h3>
+        <p>Reading, science explanations, history and civics arguments.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="compare_matrix" onclick="toggleSelect(this)">
+      <div class="letter">D</div>
+      <div class="content">
+        <h3>Compare Matrix</h3>
+        <p>Sort examples by traits across rows and columns.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="label">Not Wave 1</div>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Keep Later</h4>
+      <ul>
+        <li>Flashcard: useful review mechanic</li>
+        <li>Binary true/false: decent quick-check mechanic</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Why Not First</h4>
+      <ul>
+        <li>weak multimodal evidence</li>
+        <li>more quiz energy than tutor-workspace energy</li>
+        <li>less coverage across deep subjects</li>
+      </ul>
+    </div>
+  </div>
+</div>

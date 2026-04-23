@@ -124,6 +124,13 @@ describe('queueTutorGeneratedImages', () => {
       imageUrl: 'https://example.com/original.png',
       topic: 'water cycle',
     });
+    expect(logSpy).toHaveBeenCalledWith(
+      '[tutor:image-gen:plan]',
+      expect.objectContaining({
+        sessionId: 'tutor_123',
+        plannedJobCount: 2,
+      })
+    );
     expect(mockCreateReplicatePrediction).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -152,6 +159,16 @@ describe('queueTutorGeneratedImages', () => {
           remove: ['nucleus'],
           swap: [],
         },
+      })
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      '[tutor:image-gen:start]',
+      expect.objectContaining({
+        sessionId: 'tutor_123',
+        predictionId: 'pred_generate',
+        sourceType: 'generate',
+        purpose: 'teaching_visual',
+        prompt: 'clear educational diagram of the water cycle',
       })
     );
     expect(logSpy).toHaveBeenCalledWith(
@@ -192,5 +209,139 @@ describe('queueTutorGeneratedImages', () => {
     expect(mockCreateAdminClient).not.toHaveBeenCalled();
     expect(mockCreateReplicatePrediction).not.toHaveBeenCalled();
     expect(mockCreateTutorImageGenerationJob).not.toHaveBeenCalled();
+  });
+
+  it('forces one edit job when the planner returns none and a searched image has labels', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  jobs: [],
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    await queueTutorGeneratedImages({
+      sessionId: 'tutor_force_edit',
+      topic: 'photosynthesis',
+      learnerLevel: 'beginner',
+      outline: ['Start with the leaf parts.'],
+      imageAssets: [
+        {
+          id: 'img-1',
+          url: 'https://example.com/photosynthesis.png',
+          altText: 'Photosynthesis diagram',
+          description: 'Photosynthesis diagram',
+        },
+      ],
+      origin: 'http://localhost:3000',
+    });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      '[tutor:image-gen:plan]',
+      expect.objectContaining({
+        sessionId: 'tutor_force_edit',
+        plannerJobCount: 0,
+        plannedJobCount: 1,
+        fallbackApplied: true,
+      })
+    );
+    expect(mockCreateReplicatePrediction).toHaveBeenCalledTimes(1);
+    expect(mockCreateReplicatePrediction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'edit',
+        inputImages: ['https://example.com/photosynthesis.png'],
+      })
+    );
+    expect(mockCreateTutorImageGenerationJob).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: 'tutor_force_edit',
+        sourceType: 'edit',
+        sourceImageId: 'img-1',
+        requestedEditsJson: {
+          remove: ['cell membrane'],
+          swap: [],
+        },
+      })
+    );
+  });
+
+  it('forces one generate job when the planner returns none and no searched image has labels', async () => {
+    mockExtractEditableImageInventory.mockResolvedValue({
+      summary: 'Simple photosynthesis illustration.',
+      visibleLabels: [],
+      keyItems: ['leaf'],
+    });
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  jobs: [],
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    await queueTutorGeneratedImages({
+      sessionId: 'tutor_force_generate',
+      topic: 'photosynthesis',
+      learnerLevel: 'beginner',
+      outline: ['Explain sunlight, water, and carbon dioxide.'],
+      imageAssets: [
+        {
+          id: 'img-1',
+          url: 'https://example.com/photosynthesis.png',
+          altText: 'Photosynthesis diagram',
+          description: 'Photosynthesis diagram',
+        },
+      ],
+      origin: 'http://localhost:3000',
+    });
+
+    expect(mockCreateReplicatePrediction).toHaveBeenCalledTimes(1);
+    expect(mockCreateReplicatePrediction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'generate',
+        aspectRatio: '1:1',
+        prompt: expect.stringContaining('photosynthesis'),
+      })
+    );
+    expect(mockCreateTutorImageGenerationJob).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: 'tutor_force_generate',
+        sourceType: 'generate',
+        purpose: 'teaching_visual',
+      })
+    );
   });
 });

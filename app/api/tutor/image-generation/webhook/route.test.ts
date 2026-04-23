@@ -247,6 +247,8 @@ describe('POST /api/tutor/image-generation/webhook', () => {
   });
 
   it('downloads, stores, and describes a generated image before marking the job completed', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
     const rawBody = JSON.stringify({
       id: 'pred_123',
       status: 'succeeded',
@@ -338,6 +340,15 @@ describe('POST /api/tutor/image-generation/webhook', () => {
             output: 'https://replicate.example/output.png',
           }),
         }),
+      })
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      '[tutor:image-gen:success]',
+      expect.objectContaining({
+        predictionId: 'pred_123',
+        jobId: 'job_1',
+        sourceType: 'generate',
+        assetUrl: 'https://supabase.example/stored-path',
       })
     );
     expect(mockMarkFailed).not.toHaveBeenCalled();
@@ -602,6 +613,15 @@ describe('POST /api/tutor/image-generation/webhook', () => {
     );
 
     expect(response.status).toBe(200);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[tutor:image-gen:failed]',
+      expect.objectContaining({
+        predictionId: 'pred_edit_failed',
+        jobId: 'job_failed',
+        sourceType: 'edit',
+        error: 'Replicate rejected the request',
+      })
+    );
     expect(errorSpy).toHaveBeenCalledWith(
       '[tutor:image-edit:failed]',
       expect.objectContaining({
