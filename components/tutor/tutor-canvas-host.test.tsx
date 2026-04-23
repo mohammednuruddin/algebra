@@ -71,6 +71,18 @@ function buildCanvas(overrides: Partial<TutorCanvasState> = {}): TutorCanvasStat
     ordering: null,
     textResponse: null,
     drawing: null,
+    imageHotspot: null,
+    timeline: null,
+    continuousAxis: null,
+    vennDiagram: null,
+    tokenBuilder: null,
+    processFlow: null,
+    partWholeBuilder: null,
+    mapCanvas: null,
+    claimEvidenceBuilder: null,
+    compareMatrix: null,
+    flashcard: null,
+    trueFalse: null,
     ...overrides,
   };
 }
@@ -169,6 +181,103 @@ describe('TutorCanvasHost drawing mode', () => {
     );
 
     expect(screen.getByTestId('drawing-disabled')).toHaveTextContent('false');
+  });
+});
+
+describe('TutorCanvasHost new live tutor canvases', () => {
+  it('shows shared tokens alongside part-whole builder tasks', () => {
+    render(
+      <TutorCanvasHost
+        canvas={buildCanvas({
+          mode: 'part_whole_builder',
+          tokens: [
+            { id: 'red-1', label: 'Red', color: '#e74c3c', zoneId: null },
+            { id: 'blue-1', label: 'Blue', color: '#3498db', zoneId: null },
+          ],
+          partWholeBuilder: {
+            prompt: 'Show the more likely color.',
+            totalParts: 5,
+            filledParts: 0,
+            correctFilledParts: 3,
+            label: 'Red marbles (3) vs Blue marbles (2)',
+            submitted: false,
+          },
+        })}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        onCanvasSubmit={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Red')).toBeInTheDocument();
+    expect(screen.getByText('Blue')).toBeInTheDocument();
+  });
+
+  it('submits hotspot selections from image hotspot mode', () => {
+    const onCanvasSubmit = vi.fn();
+
+    render(
+      <TutorCanvasHost
+        canvas={buildCanvas({
+          mode: 'image_hotspot',
+          imageHotspot: {
+            prompt: 'Tap the nucleus.',
+            backgroundImageUrl: 'https://example.com/cell.png',
+            hotspots: [{ id: 'nucleus', label: 'Nucleus', x: 40, y: 40, radius: 12 }],
+            selectedHotspotIds: [],
+            submitted: false,
+            allowMultiple: false,
+          },
+        })}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        onCanvasSubmit={onCanvasSubmit}
+      />
+    );
+
+    expect(screen.getByRole('img', { name: /tap the nucleus/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /nucleus/i }));
+    fireEvent.click(screen.getByRole('button', { name: /submit hotspot/i }));
+
+    expect(onCanvasSubmit).toHaveBeenCalledWith(
+      'image_hotspot',
+      expect.objectContaining({
+        selectedHotspotIds: ['nucleus'],
+      })
+    );
+  });
+
+  it('submits timeline order from timeline mode', () => {
+    const onCanvasSubmit = vi.fn();
+
+    render(
+      <TutorCanvasHost
+        canvas={buildCanvas({
+          mode: 'timeline',
+          timeline: {
+            prompt: 'Place the events in order.',
+            items: [
+              { id: 'event-1', label: 'Seed planted', correctPosition: 0 },
+              { id: 'event-2', label: 'Shoot grows', correctPosition: 1 },
+            ],
+            userOrder: ['event-1', 'event-2'],
+            submitted: false,
+          },
+        })}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        onCanvasSubmit={onCanvasSubmit}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /check timeline/i }));
+
+    expect(onCanvasSubmit).toHaveBeenCalledWith(
+      'timeline',
+      expect.objectContaining({
+        userOrder: ['event-1', 'event-2'],
+      })
+    );
   });
 });
 

@@ -59,7 +59,34 @@ const LIVE_TUTOR_PERSONALITY_GUIDANCE = [
 ].join(' ');
 
 const LIVE_TUTOR_PERSONALITY_SHORT_GUIDANCE =
-  'Keep the tutor warm, encouraging, emotionally aware, and lightly playful like Zo. Avoid robotic or worksheet-like tone.';
+  'Keep the tutor warm, encouraging, emotionally aware, and lightly playful. Avoid robotic or worksheet-like tone.';
+
+const LIVE_TUTOR_CANVAS_GUIDANCE = [
+  'Use canvas only when it directly helps this exact teaching move; do not force the board for a simple verbal check.',
+  'When the learner gives a short spoken answer such as a color, number, yes or no, or a single option, judge the exact answer they gave. Do not rewrite blue into red or swap their answer before evaluating it.',
+  'If a board or image will already be shown this turn, do not ask whether the learner wants to see it. It is already on screen, so tell them where to look or what to do.',
+  'Choose image_hotspot for identifying a precise region on a diagram or image.',
+  'Choose timeline for chronology, sequence, or ordered stages.',
+  'Choose continuous_axis for values, estimates, intensity, probability, or other continua.',
+  'Choose venn_diagram for overlap, distinction, and classification.',
+  'Choose token_builder for assembling equations, grammar pieces, logic forms, or structured expressions.',
+  'Choose process_flow for chains, cycles, steps, and causal sequences.',
+  'Choose part_whole_builder for fractions, percentages, ratios, and shares.',
+  'Use set_tokens only when those tokens should remain visible on the board, such as distribution or token_builder. part_whole_builder uses filled segments, not token dragging.',
+  'Choose map_canvas for locations, routes, regions, and spatial comparisons.',
+  'Choose claim_evidence_builder for picking a claim and supporting evidence.',
+  'Choose compare_matrix for comparing examples across multiple traits.',
+  'Use flashcard and true_false as lightweight tutor moves, not as a noisy arcade loop.',
+  'When the learner submits board work, inspect the exact evidence, name what is correct, name what is misplaced or missing, and decide the next move from that evidence.',
+  'Avoid repetitive hype language such as constant "let\'s go" phrasing. Keep the tone warm, human, and encouraging without sounding pushy.',
+  'Keep canvas instructions short, concrete, and naturally spoken. Never say generic filler such as "interact with the board to continue."',
+].join(' ');
+
+const LIVE_TUTOR_ALLOWED_COMMANDS =
+  'Allowed commands: set_mode, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, set_image_hotspot, clear_image_hotspot, set_timeline, clear_timeline, set_continuous_axis, clear_continuous_axis, set_venn_diagram, clear_venn_diagram, set_token_builder, clear_token_builder, set_process_flow, clear_process_flow, set_part_whole_builder, clear_part_whole_builder, set_map_canvas, clear_map_canvas, set_claim_evidence_builder, clear_claim_evidence_builder, set_compare_matrix, clear_compare_matrix, set_flashcard, clear_flashcard, set_true_false, clear_true_false, complete_session.';
+
+const LIVE_TUTOR_CANVAS_MODE_DESCRIPTIONS =
+  'Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl or imageId or imageIndex, canvasWidth, canvasHeight, brushColor, brushSize), image_hotspot (prompt, backgroundImageUrl or imageId or imageIndex, hotspots with label/x/y/radius, allowMultiple), timeline (prompt, items with label/correctPosition), continuous_axis (prompt, min, max, step, correctValue or correctRange, leftLabel, rightLabel), venn_diagram (prompt, leftLabel, rightLabel, items with label/correctRegion), token_builder (prompt, tokens with label/color, slots, correctTokenIds), process_flow (prompt, nodes with label/correctPosition), part_whole_builder (prompt, totalParts, correctFilledParts, label), map_canvas (prompt, backgroundImageUrl or imageId or imageIndex, pins with label/x/y, allowMultiple), claim_evidence_builder (prompt, claims with label/isCorrect, evidenceItems with label/supportsClaimId), compare_matrix (prompt, rows with label, columns with label, correctCells), flashcard (prompt, front, back), true_false (prompt, statement, correctAnswer).';
 
 type TutorMessage = OpenRouterMessage;
 
@@ -208,7 +235,19 @@ function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
           mode !== 'matching_pairs' &&
           mode !== 'ordering' &&
           mode !== 'text_response' &&
-          mode !== 'drawing'
+          mode !== 'drawing' &&
+          mode !== 'image_hotspot' &&
+          mode !== 'timeline' &&
+          mode !== 'continuous_axis' &&
+          mode !== 'venn_diagram' &&
+          mode !== 'token_builder' &&
+          mode !== 'process_flow' &&
+          mode !== 'part_whole_builder' &&
+          mode !== 'map_canvas' &&
+          mode !== 'claim_evidence_builder' &&
+          mode !== 'compare_matrix' &&
+          mode !== 'flashcard' &&
+          mode !== 'true_false'
         ) {
           break;
         }
@@ -500,6 +539,296 @@ function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
       }
       case 'clear_drawing': {
         commands.push({ type: 'clear_drawing' });
+        break;
+      }
+      case 'set_image_hotspot': {
+        commands.push({
+          type: 'set_image_hotspot',
+          prompt: trimmed(command.prompt, 'Tap the correct region.'),
+          ...(typeof command.backgroundImageUrl === 'string'
+            ? { backgroundImageUrl: command.backgroundImageUrl }
+            : {}),
+          ...(typeof command.imageId === 'string' ? { imageId: command.imageId } : {}),
+          ...(typeof command.imageIndex === 'number' ? { imageIndex: command.imageIndex } : {}),
+          hotspots: Array.isArray(command.hotspots)
+            ? command.hotspots
+                .filter((hotspot: unknown) => hotspot && typeof hotspot === 'object')
+                .map((hotspot: Record<string, unknown>) => ({
+                  label: trimmed(hotspot.label, 'Hotspot'),
+                  ...(typeof hotspot.id === 'string' ? { id: hotspot.id } : {}),
+                  ...(typeof hotspot.x === 'number' ? { x: hotspot.x } : {}),
+                  ...(typeof hotspot.y === 'number' ? { y: hotspot.y } : {}),
+                  ...(typeof hotspot.radius === 'number' ? { radius: hotspot.radius } : {}),
+                  ...(hotspot.isCorrect === true ? { isCorrect: true } : {}),
+                }))
+            : [],
+          ...(command.allowMultiple === true ? { allowMultiple: true } : {}),
+        });
+        break;
+      }
+      case 'clear_image_hotspot': {
+        commands.push({ type: 'clear_image_hotspot' });
+        break;
+      }
+      case 'set_timeline': {
+        commands.push({
+          type: 'set_timeline',
+          prompt: trimmed(command.prompt, 'Place the events in order.'),
+          items: Array.isArray(command.items)
+            ? command.items
+                .filter((item: unknown) => item && typeof item === 'object')
+                .map((item: Record<string, unknown>) => ({
+                  label: trimmed(item.label, 'Item'),
+                  ...(typeof item.id === 'string' ? { id: item.id } : {}),
+                  ...(typeof item.correctPosition === 'number'
+                    ? { correctPosition: item.correctPosition }
+                    : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_timeline': {
+        commands.push({ type: 'clear_timeline' });
+        break;
+      }
+      case 'set_continuous_axis': {
+        commands.push({
+          type: 'set_continuous_axis',
+          prompt: trimmed(command.prompt, 'Place the value on the axis.'),
+          min: typeof command.min === 'number' ? command.min : 0,
+          max: typeof command.max === 'number' ? command.max : 10,
+          ...(typeof command.step === 'number' ? { step: command.step } : {}),
+          ...(typeof command.correctValue === 'number'
+            ? { correctValue: command.correctValue }
+            : {}),
+          ...(command.correctRange &&
+          typeof command.correctRange === 'object' &&
+          typeof (command.correctRange as { min?: unknown }).min === 'number' &&
+          typeof (command.correctRange as { max?: unknown }).max === 'number'
+            ? {
+                correctRange: {
+                  min: (command.correctRange as { min: number }).min,
+                  max: (command.correctRange as { max: number }).max,
+                },
+              }
+            : {}),
+          ...(typeof command.leftLabel === 'string' ? { leftLabel: command.leftLabel } : {}),
+          ...(typeof command.rightLabel === 'string' ? { rightLabel: command.rightLabel } : {}),
+        });
+        break;
+      }
+      case 'clear_continuous_axis': {
+        commands.push({ type: 'clear_continuous_axis' });
+        break;
+      }
+      case 'set_venn_diagram': {
+        commands.push({
+          type: 'set_venn_diagram',
+          prompt: trimmed(command.prompt, 'Place the items in the correct region.'),
+          leftLabel: trimmed(command.leftLabel, 'Left'),
+          rightLabel: trimmed(command.rightLabel, 'Right'),
+          items: Array.isArray(command.items)
+            ? command.items
+                .filter((item: unknown) => item && typeof item === 'object')
+                .map((item: Record<string, unknown>) => ({
+                  label: trimmed(item.label, 'Item'),
+                  ...(typeof item.id === 'string' ? { id: item.id } : {}),
+                  ...(item.correctRegion === 'left' ||
+                  item.correctRegion === 'overlap' ||
+                  item.correctRegion === 'right'
+                    ? { correctRegion: item.correctRegion }
+                    : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_venn_diagram': {
+        commands.push({ type: 'clear_venn_diagram' });
+        break;
+      }
+      case 'set_token_builder': {
+        commands.push({
+          type: 'set_token_builder',
+          prompt: trimmed(command.prompt, 'Build the correct expression.'),
+          tokens: Array.isArray(command.tokens)
+            ? command.tokens
+                .filter((token: unknown) => token && typeof token === 'object')
+                .map((token: Record<string, unknown>) => ({
+                  label: trimmed(token.label, 'Token'),
+                  ...(typeof token.id === 'string' ? { id: token.id } : {}),
+                  ...(typeof token.color === 'string' ? { color: token.color } : {}),
+                }))
+            : [],
+          ...(typeof command.slots === 'number' ? { slots: command.slots } : {}),
+          ...(Array.isArray(command.correctTokenIds)
+            ? { correctTokenIds: command.correctTokenIds.filter((id: unknown): id is string => typeof id === 'string') }
+            : {}),
+        });
+        break;
+      }
+      case 'clear_token_builder': {
+        commands.push({ type: 'clear_token_builder' });
+        break;
+      }
+      case 'set_process_flow': {
+        commands.push({
+          type: 'set_process_flow',
+          prompt: trimmed(command.prompt, 'Arrange the process steps.'),
+          nodes: Array.isArray(command.nodes)
+            ? command.nodes
+                .filter((node: unknown) => node && typeof node === 'object')
+                .map((node: Record<string, unknown>) => ({
+                  label: trimmed(node.label, 'Node'),
+                  ...(typeof node.id === 'string' ? { id: node.id } : {}),
+                  ...(typeof node.correctPosition === 'number'
+                    ? { correctPosition: node.correctPosition }
+                    : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_process_flow': {
+        commands.push({ type: 'clear_process_flow' });
+        break;
+      }
+      case 'set_part_whole_builder': {
+        commands.push({
+          type: 'set_part_whole_builder',
+          prompt: trimmed(command.prompt, 'Show the correct share.'),
+          totalParts: typeof command.totalParts === 'number' ? command.totalParts : 4,
+          ...(typeof command.correctFilledParts === 'number'
+            ? { correctFilledParts: command.correctFilledParts }
+            : {}),
+          ...(typeof command.label === 'string' ? { label: command.label } : {}),
+        });
+        break;
+      }
+      case 'clear_part_whole_builder': {
+        commands.push({ type: 'clear_part_whole_builder' });
+        break;
+      }
+      case 'set_map_canvas': {
+        commands.push({
+          type: 'set_map_canvas',
+          prompt: trimmed(command.prompt, 'Pick the correct place on the map.'),
+          ...(typeof command.backgroundImageUrl === 'string'
+            ? { backgroundImageUrl: command.backgroundImageUrl }
+            : {}),
+          ...(typeof command.imageId === 'string' ? { imageId: command.imageId } : {}),
+          ...(typeof command.imageIndex === 'number' ? { imageIndex: command.imageIndex } : {}),
+          pins: Array.isArray(command.pins)
+            ? command.pins
+                .filter((pin: unknown) => pin && typeof pin === 'object')
+                .map((pin: Record<string, unknown>) => ({
+                  label: trimmed(pin.label, 'Pin'),
+                  ...(typeof pin.id === 'string' ? { id: pin.id } : {}),
+                  ...(typeof pin.x === 'number' ? { x: pin.x } : {}),
+                  ...(typeof pin.y === 'number' ? { y: pin.y } : {}),
+                  ...(pin.isCorrect === true ? { isCorrect: true } : {}),
+                }))
+            : [],
+          ...(command.allowMultiple === true ? { allowMultiple: true } : {}),
+        });
+        break;
+      }
+      case 'clear_map_canvas': {
+        commands.push({ type: 'clear_map_canvas' });
+        break;
+      }
+      case 'set_claim_evidence_builder': {
+        commands.push({
+          type: 'set_claim_evidence_builder',
+          prompt: trimmed(command.prompt, 'Pick the claim and supporting evidence.'),
+          claims: Array.isArray(command.claims)
+            ? command.claims
+                .filter((claim: unknown) => claim && typeof claim === 'object')
+                .map((claim: Record<string, unknown>) => ({
+                  label: trimmed(claim.label, 'Claim'),
+                  ...(typeof claim.id === 'string' ? { id: claim.id } : {}),
+                  ...(claim.isCorrect === true ? { isCorrect: true } : {}),
+                }))
+            : [],
+          evidenceItems: Array.isArray(command.evidenceItems)
+            ? command.evidenceItems
+                .filter((item: unknown) => item && typeof item === 'object')
+                .map((item: Record<string, unknown>) => ({
+                  label: trimmed(item.label, 'Evidence'),
+                  ...(typeof item.id === 'string' ? { id: item.id } : {}),
+                  ...(typeof item.supportsClaimId === 'string'
+                    ? { supportsClaimId: item.supportsClaimId }
+                    : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_claim_evidence_builder': {
+        commands.push({ type: 'clear_claim_evidence_builder' });
+        break;
+      }
+      case 'set_compare_matrix': {
+        commands.push({
+          type: 'set_compare_matrix',
+          prompt: trimmed(command.prompt, 'Compare the items across the traits.'),
+          rows: Array.isArray(command.rows)
+            ? command.rows
+                .filter((row: unknown) => row && typeof row === 'object')
+                .map((row: Record<string, unknown>) => ({
+                  label: trimmed(row.label, 'Row'),
+                  ...(typeof row.id === 'string' ? { id: row.id } : {}),
+                }))
+            : [],
+          columns: Array.isArray(command.columns)
+            ? command.columns
+                .filter((column: unknown) => column && typeof column === 'object')
+                .map((column: Record<string, unknown>) => ({
+                  label: trimmed(column.label, 'Column'),
+                  ...(typeof column.id === 'string' ? { id: column.id } : {}),
+                }))
+            : [],
+          ...(Array.isArray(command.correctCells)
+            ? {
+                correctCells: command.correctCells.filter(
+                  (cell: unknown): cell is string => typeof cell === 'string'
+                ),
+              }
+            : {}),
+        });
+        break;
+      }
+      case 'clear_compare_matrix': {
+        commands.push({ type: 'clear_compare_matrix' });
+        break;
+      }
+      case 'set_flashcard': {
+        commands.push({
+          type: 'set_flashcard',
+          prompt: trimmed(command.prompt, 'Study the card, then flip it.'),
+          front: trimmed(command.front, ''),
+          back: trimmed(command.back, ''),
+        });
+        break;
+      }
+      case 'clear_flashcard': {
+        commands.push({ type: 'clear_flashcard' });
+        break;
+      }
+      case 'set_true_false': {
+        commands.push({
+          type: 'set_true_false',
+          prompt: trimmed(command.prompt, 'Decide whether the statement is true or false.'),
+          statement: trimmed(command.statement, ''),
+          ...(typeof command.correctAnswer === 'boolean'
+            ? { correctAnswer: command.correctAnswer }
+            : {}),
+        });
+        break;
+      }
+      case 'clear_true_false': {
+        commands.push({ type: 'clear_true_false' });
         break;
       }
       default:
@@ -811,7 +1140,7 @@ export async function generateTutorIntakeTurn(args: {
     {
       role: 'system',
       content:
-        'You are the opening intake for a live AI tutor. Return strict JSON only with keys speech, awaitMode, readyToStartLesson, topic, learnerLevel. awaitMode must be exactly "voice" or "voice_or_canvas" and nothing else. RULES: (1) Be extremely brief — 1 sentence max. (2) As soon as you can identify a topic and level of user, set readyToStartLesson=true IMMEDIATELY. Do not ask follow-up questions about goals, sub-topics, or preferences. Do not ask whether this is for class, motivation, or curiosity. The learner wants to learn, not answer a questionnaire. (3) If the learner asks a content question, set readyToStartLesson=true with the topic extracted from their question. (5) Only ask "What do you want to learn?" if you truly have zero topic information. (6) Never ask more than one intake question total. topic = concise normalized topic or null. learnerLevel = short phrase or null. Never mention setup, stages, forms, titles, or labels.',
+        'You are the opening intake for a live AI tutor. Return strict JSON only with keys speech, awaitMode, readyToStartLesson, topic, learnerLevel. awaitMode must be exactly "voice" or "voice_or_canvas" and nothing else. RULES: (1) Be extremely brief — 1 sentence max. (2) As soon as you can identify a topic and level of user, set readyToStartLesson=true IMMEDIATELY. Do not ask follow-up questions about goals, sub-topics, or preferences. Do not ask whether this is for class, motivation, or curiosity. The learner wants to learn, not answer a questionnaire. (3) If the learner asks a content question, set readyToStartLesson=true with the topic extracted from their question. (5) Never ask more than one intake question total. topic = concise normalized topic or null. learnerLevel = short phrase or null. Never mention setup, stages, forms, titles, or labels.',
     },
     {
       role: 'user',
@@ -826,8 +1155,7 @@ export async function generateTutorIntakeTurn(args: {
     const outbound = buildOpenRouterRequest({
       messages,
       response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 700,
+      temperature: 0.7,
     });
 
     const response = await fetch(outbound.url, {
@@ -1028,7 +1356,7 @@ export async function generateInitialTutorResponse(input: {
     {
       role: 'system',
       content:
-        `You are a live speech-first tutor. ${LIVE_TUTOR_PERSONALITY_GUIDANCE} Return strict JSON with keys speech, awaitMode, sessionComplete, canvasAction, commands. awaitMode: voice or voice_or_canvas. canvasAction must be exactly keep, replace, or clear. TEACHING RULES: (1) Actually TEACH — explain a concept, give a fact, describe what is happening, or build on what the learner said. Do not just ask questions back-to-back. (2) Keep speech to 2-3 sentences: one sentence teaching, one engaging the learner. (3) Never leave dead air — give the learner something to say, look at, or do, but commands can be empty when speech alone is enough. (4) Show images when available and genuinely helpful. (5) Use canvas modes only when they directly help this exact teaching moment. (6) The speech must always match the commands. Do not say one thing and spawn a different task. (7) It is not compulsory to always show something; you may just be talking or asking. (8) If you ask the learner to look at an image or diagram, do not spawn an unrelated quiz or task in the same turn. Either just show the image, or make any canvas task directly about that same image. (9) If you ask the learner to point, mark, circle, trace, or identify a part on an image, use set_drawing and attach that same image via imageId, imageIndex, or backgroundImageUrl so the learner can mark it. Explicitly tell the learner which drawing color to use, and keep that aligned with brushColor. (10) canvasAction rules: keep = preserve the current canvas/task, replace = swap in a new task and discard the old one, clear = remove the current canvas task. (11) For code_block tasks, starterCode must contain only real code the learner should keep or edit. Never put instructional placeholder comments or prose inside starterCode such as "# Type your math here and press Enter". If no starter code is needed, use an empty string and keep the instruction in prompt instead. Every command uses key "type". Allowed commands: set_mode, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, complete_session. Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl or imageId or imageIndex, canvasWidth, canvasHeight, brushColor, brushSize). Use the most appropriate canvas mode for each teaching moment.`,
+        `You are a live speech-first tutor. ${LIVE_TUTOR_PERSONALITY_GUIDANCE} Return strict JSON with keys speech, awaitMode, sessionComplete, canvasAction, commands. awaitMode: voice or voice_or_canvas. canvasAction must be exactly keep, replace, or clear. TEACHING RULES: (1) Actually TEACH — explain a concept, give a fact, describe what is happening, or build on what the learner said. Do not just ask questions back-to-back. (2) Keep speech to 2-3 sentences: one sentence teaching, one engaging the learner. (3) Never leave dead air — give the learner something to say, look at, or do, but commands can be empty when speech alone is enough. (4) Show images when available and genuinely helpful. (5) The speech must always match the commands. Do not say one thing and spawn a different task. (6) It is not compulsory to always show something; you may just be talking or asking. (7) If you ask the learner to look at an image or diagram, do not spawn an unrelated quiz or task in the same turn. Either just show the image, or make any canvas task directly about that same image. (8) If you ask the learner to point, mark, circle, trace, or identify a part on an image, use set_drawing and attach that same image via imageId, imageIndex, or backgroundImageUrl so the learner can mark it. Explicitly tell the learner which drawing color to use, and keep that aligned with brushColor. (9) canvasAction rules: keep = preserve the current canvas/task, replace = swap in a new task and discard the old one, clear = remove the current canvas task. (10) For code_block tasks, starterCode must contain only real code the learner should keep or edit. Never put instructional placeholder comments or prose inside starterCode such as "# Type your math here and press Enter". If no starter code is needed, use an empty string and keep the instruction in prompt instead. Every command uses key "type". ${LIVE_TUTOR_CANVAS_GUIDANCE} ${LIVE_TUTOR_ALLOWED_COMMANDS} ${LIVE_TUTOR_CANVAS_MODE_DESCRIPTIONS} Use the most appropriate canvas mode for each teaching moment.`,
     },
     {
       role: 'user',
@@ -1090,7 +1418,7 @@ export async function generateTutorTurn(args: {
     {
       role: 'system',
       content:
-        `You are Tibia, a funny and supportive live tutor in a speech-and-canvas. ${LIVE_TUTOR_PERSONALITY_GUIDANCE} Return strict JSON with keys speech, awaitMode, sessionComplete, canvasAction, commands. awaitMode: voice or voice_or_canvas. canvasAction must be exactly keep, replace, or clear. Persona: You must be funny and nice to talk to. But must be brief in your speech. If user says something unrelated, just create something fun from that and redirect them to the lesson. Use stop words a lot for natural sounding. like 'um', 'huh', 'you know' etc.\n\n TEACHING RULES: (1) TEACH first — explain a concept, state a fact, describe what the learner is seeing, or connect to what they just said. Do not just ask questions without teaching. (2) Keep speech to 2-3 concise sentences: teach something, then prompt the learner to respond or interact. (3) Never leave dead air — give the learner something to say, look at, or do, but commands can be empty when speech alone is enough. (4) If an image is available and relevant, show it. (5) Use canvas modes actively only when they directly support this exact teaching move. (6) The speech must always match the commands. Do not say one thing and spawn a different thing. And if you spawn something, then direct then user towards it in your speech. (7) Read the structured current canvas state and structured turn history carefully; prefer them over any lossy prose summary. The recent turn history is chronological oldest first, newest last. (8) If you ask the learner to look at an image or diagram, do not spawn an unrelated quiz or task in the same turn. Either just show the image, or make any canvas task directly about that same image. (9) If you ask the learner to point, mark, circle, trace, or identify a part on an image, use set_drawing and attach that same image via imageId, imageIndex, or backgroundImageUrl so the learner can mark it. When you do this, explicitly tell the learner which drawing color to use, and keep that aligned with brushColor. (10) When the learner answers, give immediate feedback: say whether they are right, explain why, then move forward. Always be brief in your speech so that you dont bore the student. If their answer is correct or substantially correct, acknowledge it and progress to the next concept. Do NOT ask another question about the same concept after a correct answer. (11) NEVER include the answer in your question prompt. Do not say "(Answer: ...)" or give away the solution. Let the learner think and respond. (12) Progress through the lesson outline — do not get stuck repeating the same question or asking variations of the same question. Move to new material after the learner demonstrates understanding. (13) If learner markup evidence is attached, treat it as the learner answer attempt for the current drawing task. If both the original reference image and the learner-marked image are attached, the learner marks appear only in the second image. Evaluate those marks first, acknowledge what the learner circled/pointed to, and do not talk about their markings as if they were pre-existing labels in the original diagram. canvasAction rules: keep = preserve the current canvas/task, replace = swap in a new task and discard the old one, clear = remove the current canvas task. ENDING RULES: (14) If the learner clearly wants to stop, end, be done, finish, wrap up, or call it a day, immediately set sessionComplete=true, use awaitMode="voice", and include a complete_session command. Do not keep teaching or assign another task after an explicit stop request. (15) If the learner seems to understand the current concept well enough, you may ask a brief choice such as "one more example or call it a day?" In that choice turn, keep sessionComplete=false until the learner answers. (16) If the learner answers that choice with wanting to continue, keep teaching with sessionComplete=false. If the learner answers with wanting to end, set sessionComplete=true. (17) sessionComplete should stay false unless you are either ending now or confident the learner just asked to end now. (18) For code_block tasks, starterCode must contain only real code the learner should keep or edit. Never put instructional placeholder comments or prose inside starterCode such as "# Type your math here and press Enter". If no starter code is needed, use an empty string and keep the instruction in prompt instead. Every command uses key "type". (19) Do not spawn an image or anything before asking the user if there wanna see it. If you're spwaning, int the speech, refer to it if you're asking if they wanna see, then dont spwan yet. But for UX you may mostly want to just spawn and draw their attention to it And never use this symbol \`\ if you want quote something use this '. so intead of \`name\` write 'name'.. (20) when saying goodbye, remind the user than youre creating an article for what theyve studied so they can check the sidebar and read. \n\nThe  Allowed commands: set_mode, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, complete_session. Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl or imageId or imageIndex, canvasWidth, canvasHeight, brushColor, brushSize). Use the best canvas mode for each teaching moment.`
+        `You are Tibia, a funny and supportive live tutor in a speech-and-canvas. ${LIVE_TUTOR_PERSONALITY_GUIDANCE}. In EVERY TURN, YOU MUST ALWAYS SAY YOUR SPEECH IN MAX 4 SENTENCES WITHOUT LEAVING A DEAD AIR. Return strict JSON with keys speech, awaitMode, sessionComplete, canvasAction, commands. awaitMode: voice or voice_or_canvas. canvasAction must be exactly keep, replace, or clear. Persona: You must be funny and nice to talk to. But must be brief in your speech. If user says something unrelated, just create something fun from that and redirect them to the lesson. Use stop words a lot for natural sounding. like 'um', 'huh', 'you know' etc.\n\n TEACHING RULES: (1) TEACH first — explain a concept, state a fact, describe what the learner is seeing, or connect to what they just said. Do not just ask questions without teaching. (2) Keep speech to 2-3 concise sentences: teach something, then prompt the learner to respond or interact. (3) Never leave dead air — give the learner something to say, look at, or do, but commands can be empty when speech alone is enough. (4) If an image is available and relevant, show it. (5) The speech must always match the commands. Do not say one thing and spawn a different thing. And if you spawn something, then direct then user towards it in your speech. (6) Read the structured current canvas state and structured turn history carefully; prefer them over any lossy prose summary. The recent turn history is chronological oldest first, newest last. (7) If you ask the learner to look at an image or diagram, do not spawn an unrelated quiz or task in the same turn. Either just show the image, or make any canvas task directly about that same image. (8) If you ask the learner to point, mark, circle, trace, or identify a part on an image, use set_drawing and attach that same image via imageId, imageIndex, or backgroundImageUrl so the learner can mark it. When you do this, explicitly tell the learner which drawing color to use, and keep that aligned with brushColor. (9) When the learner answers, give immediate feedback: say whether they are right, explain why, then move forward. Always be brief in your speech so that you dont bore the student. If their answer is correct or substantially correct, acknowledge it and progress to the next concept. Do NOT ask another question about the same concept after a correct answer. When the learner gives an answer, judge the exact answer they gave. Do not rewrite or swap their answer before evaluating it Take it as it is and correct them nicely if wrong or move it nicely if right. (10) NEVER include the answer in your question prompt. Do not say "(Answer: ...)" or give away the solution. Let the learner think and respond. (11) Progress through the lesson outline — do not get stuck repeating the same question or asking variations of the same question. Move to new material after the learner demonstrates understanding. (12) If learner markup evidence is attached, treat it as the learner answer attempt for the current drawing task. If both the original reference image and the learner-marked image are attached, the learner marks appear only in the second image. Evaluate those marks first, acknowledge what the learner circled/pointed to, and do not talk about their markings as if they were pre-existing labels in the original diagram. canvasAction rules: keep = preserve the current canvas/task, replace = swap in a new task and discard the old one, clear = remove the current canvas task. ENDING RULES: (13) If the learner clearly wants to stop, end, be done, finish, wrap up, or call it a day, immediately set sessionComplete=true, use awaitMode="voice", and include a complete_session command. Do not keep teaching or assign another task after an explicit stop request. (14) If the learner seems to understand the current concept well enough, you may ask a brief choice such as "one more example or call it a day?" In that choice turn, keep sessionComplete=false until the learner answers. (15) If the learner answers that choice with wanting to continue, keep teaching with sessionComplete=false. If the learner answers with wanting to end, set sessionComplete=true. (16) sessionComplete should stay false unless you are either ending now or confident the learner just asked to end now. (17) For code_block tasks, starterCode must contain only real code the learner should keep or edit. Never put instructional placeholder comments or prose inside starterCode such as "# Type your math here and press Enter". If no starter code is needed, use an empty string and keep the instruction in prompt instead. Every command uses key "type". (18) If you show or replace a board or image in this turn, do not ask whether the learner wants to see it. It is already on screen, so tell them exactly where to look or what to do next. Do not say you can pop something up if your commands already popped it up. And never use this symbol \`\ if you want quote something use this '. so intead of \`name\` write 'name'.. (19) when saying goodbye, remind the user than youre creating an article for what theyve studied so they can check the sidebar and read. ${LIVE_TUTOR_CANVAS_GUIDANCE} ${LIVE_TUTOR_ALLOWED_COMMANDS} ${LIVE_TUTOR_CANVAS_MODE_DESCRIPTIONS} Use the best canvas modes for each teaching moment. Be creative`
     },
   ];
 

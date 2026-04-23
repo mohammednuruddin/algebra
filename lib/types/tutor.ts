@@ -17,7 +17,19 @@ export type TutorCanvasMode =
   | 'matching_pairs'
   | 'ordering'
   | 'text_response'
-  | 'drawing';
+  | 'drawing'
+  | 'image_hotspot'
+  | 'timeline'
+  | 'continuous_axis'
+  | 'venn_diagram'
+  | 'token_builder'
+  | 'process_flow'
+  | 'part_whole_builder'
+  | 'map_canvas'
+  | 'claim_evidence_builder'
+  | 'compare_matrix'
+  | 'flashcard'
+  | 'true_false';
 
 export interface TutorCanvasToken {
   id: string;
@@ -197,6 +209,171 @@ export interface TutorDrawingState {
   sceneRevision?: number;
 }
 
+export interface TutorHotspot {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  radius: number;
+  isCorrect?: boolean;
+}
+
+export interface TutorImageHotspotState {
+  prompt: string;
+  backgroundImageUrl?: string;
+  hotspots: TutorHotspot[];
+  selectedHotspotIds: string[];
+  allowMultiple: boolean;
+  submitted: boolean;
+}
+
+export interface TutorTimelineItem {
+  id: string;
+  label: string;
+  correctPosition?: number;
+}
+
+export interface TutorTimelineState {
+  prompt: string;
+  items: TutorTimelineItem[];
+  userOrder: string[];
+  submitted: boolean;
+}
+
+export interface TutorContinuousAxisState {
+  prompt: string;
+  min: number;
+  max: number;
+  step: number;
+  correctValue?: number;
+  correctRange?: { min: number; max: number };
+  userValue: number | null;
+  leftLabel?: string;
+  rightLabel?: string;
+  submitted: boolean;
+}
+
+export type TutorVennRegion = 'left' | 'overlap' | 'right';
+
+export interface TutorVennItem {
+  id: string;
+  label: string;
+  correctRegion?: TutorVennRegion;
+}
+
+export interface TutorVennDiagramState {
+  prompt: string;
+  leftLabel: string;
+  rightLabel: string;
+  items: TutorVennItem[];
+  placements: Record<string, TutorVennRegion | null>;
+  submitted: boolean;
+}
+
+export interface TutorBuilderToken {
+  id: string;
+  label: string;
+  color?: string;
+}
+
+export interface TutorTokenBuilderState {
+  prompt: string;
+  tokens: TutorBuilderToken[];
+  slots: number;
+  correctTokenIds?: string[];
+  userTokenIds: string[];
+  submitted: boolean;
+}
+
+export interface TutorProcessFlowState {
+  prompt: string;
+  nodes: TutorTimelineItem[];
+  userOrder: string[];
+  submitted: boolean;
+}
+
+export interface TutorPartWholeBuilderState {
+  prompt: string;
+  totalParts: number;
+  filledParts: number;
+  correctFilledParts?: number;
+  label?: string;
+  submitted: boolean;
+}
+
+export interface TutorMapPin {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  isCorrect?: boolean;
+}
+
+export interface TutorMapCanvasState {
+  prompt: string;
+  backgroundImageUrl?: string;
+  pins: TutorMapPin[];
+  selectedPinIds: string[];
+  allowMultiple: boolean;
+  submitted: boolean;
+}
+
+export interface TutorClaimOption {
+  id: string;
+  label: string;
+  isCorrect?: boolean;
+}
+
+export interface TutorEvidenceOption {
+  id: string;
+  label: string;
+  supportsClaimId?: string;
+}
+
+export interface TutorClaimEvidenceBuilderState {
+  prompt: string;
+  claims: TutorClaimOption[];
+  evidenceItems: TutorEvidenceOption[];
+  selectedClaimId: string | null;
+  linkedEvidenceIds: string[];
+  submitted: boolean;
+}
+
+export interface TutorCompareMatrixRow {
+  id: string;
+  label: string;
+}
+
+export interface TutorCompareMatrixColumn {
+  id: string;
+  label: string;
+}
+
+export interface TutorCompareMatrixState {
+  prompt: string;
+  rows: TutorCompareMatrixRow[];
+  columns: TutorCompareMatrixColumn[];
+  selectedCells: string[];
+  correctCells?: string[];
+  submitted: boolean;
+}
+
+export interface TutorFlashcardState {
+  prompt: string;
+  front: string;
+  back: string;
+  revealed: boolean;
+  submitted: boolean;
+}
+
+export interface TutorTrueFalseState {
+  prompt: string;
+  statement: string;
+  correctAnswer?: boolean;
+  userAnswer: boolean | null;
+  submitted: boolean;
+}
+
 export interface TutorCanvasState {
   mode: TutorCanvasMode;
   headline: string;
@@ -214,6 +391,18 @@ export interface TutorCanvasState {
   ordering: TutorOrderingState | null;
   textResponse: TutorTextResponseState | null;
   drawing: TutorDrawingState | null;
+  imageHotspot?: TutorImageHotspotState | null;
+  timeline?: TutorTimelineState | null;
+  continuousAxis?: TutorContinuousAxisState | null;
+  vennDiagram?: TutorVennDiagramState | null;
+  tokenBuilder?: TutorTokenBuilderState | null;
+  processFlow?: TutorProcessFlowState | null;
+  partWholeBuilder?: TutorPartWholeBuilderState | null;
+  mapCanvas?: TutorMapCanvasState | null;
+  claimEvidenceBuilder?: TutorClaimEvidenceBuilderState | null;
+  compareMatrix?: TutorCompareMatrixState | null;
+  flashcard?: TutorFlashcardState | null;
+  trueFalse?: TutorTrueFalseState | null;
 }
 
 export interface TutorIntakeState {
@@ -282,6 +471,55 @@ export type TutorCanvasInteraction =
       summary?: string;
       strokeColors?: string[];
       strokeCount?: number;
+    }
+  | {
+      mode: 'image_hotspot';
+      selectedHotspotIds: string[];
+    }
+  | {
+      mode: 'timeline';
+      userOrder: string[];
+    }
+  | {
+      mode: 'continuous_axis';
+      value: number | null;
+    }
+  | {
+      mode: 'venn_diagram';
+      placements: Record<string, TutorVennRegion | null>;
+    }
+  | {
+      mode: 'token_builder';
+      userTokenIds: string[];
+    }
+  | {
+      mode: 'process_flow';
+      userOrder: string[];
+    }
+  | {
+      mode: 'part_whole_builder';
+      filledParts: number;
+    }
+  | {
+      mode: 'map_canvas';
+      selectedPinIds: string[];
+    }
+  | {
+      mode: 'claim_evidence_builder';
+      selectedClaimId: string | null;
+      linkedEvidenceIds: string[];
+    }
+  | {
+      mode: 'compare_matrix';
+      selectedCells: string[];
+    }
+  | {
+      mode: 'flashcard';
+      revealed: boolean;
+    }
+  | {
+      mode: 'true_false';
+      answer: boolean | null;
     };
 
 export type TutorCanvasCommand =
@@ -439,6 +677,127 @@ export type TutorCanvasCommand =
     }
   | {
       type: 'clear_drawing';
+    }
+  | {
+      type: 'set_image_hotspot';
+      prompt: string;
+      backgroundImageUrl?: string;
+      imageId?: string;
+      imageIndex?: number;
+      hotspots: Array<Partial<TutorHotspot> & { label: string }>;
+      allowMultiple?: boolean;
+    }
+  | {
+      type: 'clear_image_hotspot';
+    }
+  | {
+      type: 'set_timeline';
+      prompt: string;
+      items: Array<Partial<TutorTimelineItem> & { label: string }>;
+    }
+  | {
+      type: 'clear_timeline';
+    }
+  | {
+      type: 'set_continuous_axis';
+      prompt: string;
+      min: number;
+      max: number;
+      step?: number;
+      correctValue?: number;
+      correctRange?: { min: number; max: number };
+      leftLabel?: string;
+      rightLabel?: string;
+    }
+  | {
+      type: 'clear_continuous_axis';
+    }
+  | {
+      type: 'set_venn_diagram';
+      prompt: string;
+      leftLabel: string;
+      rightLabel: string;
+      items: Array<Partial<TutorVennItem> & { label: string; correctRegion?: TutorVennRegion }>;
+    }
+  | {
+      type: 'clear_venn_diagram';
+    }
+  | {
+      type: 'set_token_builder';
+      prompt: string;
+      tokens: Array<Partial<TutorBuilderToken> & { label: string }>;
+      slots?: number;
+      correctTokenIds?: string[];
+    }
+  | {
+      type: 'clear_token_builder';
+    }
+  | {
+      type: 'set_process_flow';
+      prompt: string;
+      nodes: Array<Partial<TutorTimelineItem> & { label: string }>;
+    }
+  | {
+      type: 'clear_process_flow';
+    }
+  | {
+      type: 'set_part_whole_builder';
+      prompt: string;
+      totalParts: number;
+      correctFilledParts?: number;
+      label?: string;
+    }
+  | {
+      type: 'clear_part_whole_builder';
+    }
+  | {
+      type: 'set_map_canvas';
+      prompt: string;
+      backgroundImageUrl?: string;
+      imageId?: string;
+      imageIndex?: number;
+      pins: Array<Partial<TutorMapPin> & { label: string }>;
+      allowMultiple?: boolean;
+    }
+  | {
+      type: 'clear_map_canvas';
+    }
+  | {
+      type: 'set_claim_evidence_builder';
+      prompt: string;
+      claims: Array<Partial<TutorClaimOption> & { label: string }>;
+      evidenceItems: Array<Partial<TutorEvidenceOption> & { label: string }>;
+    }
+  | {
+      type: 'clear_claim_evidence_builder';
+    }
+  | {
+      type: 'set_compare_matrix';
+      prompt: string;
+      rows: Array<Partial<TutorCompareMatrixRow> & { label: string }>;
+      columns: Array<Partial<TutorCompareMatrixColumn> & { label: string }>;
+      correctCells?: string[];
+    }
+  | {
+      type: 'clear_compare_matrix';
+    }
+  | {
+      type: 'set_flashcard';
+      prompt: string;
+      front: string;
+      back: string;
+    }
+  | {
+      type: 'clear_flashcard';
+    }
+  | {
+      type: 'set_true_false';
+      prompt: string;
+      statement: string;
+      correctAnswer?: boolean;
+    }
+  | {
+      type: 'clear_true_false';
     }
   | {
       type: 'complete_session';

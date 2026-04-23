@@ -1,6 +1,6 @@
 'use client';
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TutorExperience } from './tutor-experience';
@@ -9,9 +9,33 @@ import type { TutorRuntimeSnapshot } from '@/lib/types/tutor';
 const mockStartSession = vi.fn();
 const mockUseTutorSession = vi.fn();
 const mockTutorShell = vi.fn((props: unknown) => {
-  void props;
-  return <div data-testid="tutor-shell" />;
+  const typedProps = props as {
+    onStartClick?: () => void;
+    snapshot?: { speech?: string };
+  };
+
+  return (
+    <div data-testid="tutor-shell">
+      <span>{typedProps.snapshot?.speech}</span>
+      {typedProps.onStartClick ? (
+        <button type="button" onClick={typedProps.onStartClick}>
+          start session
+        </button>
+      ) : null}
+    </div>
+  );
 });
+
+function createDeferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
 
 vi.mock('@/lib/hooks/use-tutor-session', () => ({
   useTutorSession: () => mockUseTutorSession(),
@@ -51,6 +75,18 @@ function buildSnapshot(): TutorRuntimeSnapshot {
       ordering: null,
       textResponse: null,
       drawing: null,
+      imageHotspot: null,
+      timeline: null,
+      continuousAxis: null,
+      vennDiagram: null,
+      tokenBuilder: null,
+      processFlow: null,
+      partWholeBuilder: null,
+      mapCanvas: null,
+      claimEvidenceBuilder: null,
+      compareMatrix: null,
+      flashcard: null,
+      trueFalse: null,
     },
     turns: [],
     intake: {
@@ -88,16 +124,53 @@ describe('TutorExperience', () => {
     });
   });
 
-  it('starts a model-owned intake session automatically instead of rendering the scripted onboarding wizard', async () => {
+  it('waits for the learner to click Start before creating the model-owned intake session', () => {
     render(<TutorExperience />);
 
-    await waitFor(() => {
-      expect(mockStartSession).toHaveBeenCalledWith({});
-    });
+    expect(mockStartSession).not.toHaveBeenCalled();
+    expect(mockTutorShell).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        isPendingStart: true,
+      })
+    );
 
     expect(
       screen.queryByText(/Start\. Answer two quick questions\. Then the lesson goes live\./i)
     ).not.toBeInTheDocument();
+  });
+
+  it('starts the intake session when the learner clicks Start', async () => {
+    mockStartSession.mockResolvedValue(buildSnapshot());
+
+    render(<TutorExperience />);
+
+    fireEvent.click(screen.getByRole('button', { name: /start session/i }));
+
+    await waitFor(() => {
+      expect(mockStartSession).toHaveBeenCalledWith({});
+    });
+  });
+
+  it('keeps the shell mounted with an in-shell loading message while the first intake turn is loading', async () => {
+    const deferred = createDeferredPromise<TutorRuntimeSnapshot>();
+    mockStartSession.mockReturnValue(deferred.promise);
+
+    render(<TutorExperience />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /start session/i }));
+    });
+
+    expect(screen.getByTestId('tutor-shell')).toBeInTheDocument();
+    expect(screen.getByText(/starting your live tutor/i)).toBeInTheDocument();
+    expect(mockTutorShell).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        isPendingStart: false,
+        isStartingSession: true,
+      })
+    );
+
+    deferred.resolve(buildSnapshot());
   });
 
   it('renders a fresh tutor snapshot with teacher audio already marked pending', async () => {
@@ -125,6 +198,8 @@ describe('TutorExperience', () => {
     mockStartSession.mockResolvedValue(buildSnapshot());
 
     const { rerender } = render(<TutorExperience />);
+
+    fireEvent.click(screen.getByRole('button', { name: /start session/i }));
 
     await waitFor(() => {
       expect(mockStartSession).toHaveBeenCalledWith({});
@@ -207,6 +282,39 @@ describe('TutorExperience', () => {
         canvasInteraction: {
           mode: 'text_response',
           text: 'i dont know',
+        },
+      })
+    );
+  });
+
+  it('forwards structured timeline submissions instead of flattening them to prose only', () => {
+    const submitTranscript = vi.fn();
+
+    mockUseTutorSession.mockReturnValue({
+      snapshot: buildSnapshot(),
+      phase: 'live',
+      error: null,
+      isSubmittingTurn: false,
+      startSession: mockStartSession,
+      submitTranscript,
+      moveToken: vi.fn(),
+      chooseEquationAnswer: vi.fn(),
+    });
+
+    render(<TutorExperience />);
+
+    const props = mockTutorShell.mock.calls.at(-1)?.[0] as {
+      onCanvasSubmit?: (mode: string, data: unknown) => void;
+    };
+
+    props.onCanvasSubmit?.('timeline', { userOrder: ['event-2', 'event-1'] });
+
+    expect(submitTranscript).toHaveBeenCalledWith(
+      '[Canvas interaction: timeline] {"userOrder":["event-2","event-1"]}',
+      expect.objectContaining({
+        canvasInteraction: {
+          mode: 'timeline',
+          userOrder: ['event-2', 'event-1'],
         },
       })
     );

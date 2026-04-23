@@ -30,10 +30,14 @@ interface TutorShellProps {
   onCanvasSubmit?: (mode: string, data: unknown) => void;
   isGeneratingArticle?: boolean;
   article?: LessonArticleRecord | null;
+  initialSidebarCollapsed?: boolean;
   teacherSpeaking: boolean;
   onTeacherSpeakingChange: (value: boolean) => void;
   onTeacherAudioPendingChange?: (value: boolean) => void;
   onTeacherInterrupt?: () => void;
+  isPendingStart?: boolean;
+  isStartingSession?: boolean;
+  onStartClick?: () => void;
 }
 
 function hasVisibleCanvasScene(snapshot: TutorRuntimeSnapshot) {
@@ -50,6 +54,18 @@ function hasVisibleCanvasScene(snapshot: TutorRuntimeSnapshot) {
     canvas.ordering ||
     canvas.textResponse ||
     canvas.drawing ||
+    canvas.imageHotspot ||
+    canvas.timeline ||
+    canvas.continuousAxis ||
+    canvas.vennDiagram ||
+    canvas.tokenBuilder ||
+    canvas.processFlow ||
+    canvas.partWholeBuilder ||
+    canvas.mapCanvas ||
+    canvas.claimEvidenceBuilder ||
+    canvas.compareMatrix ||
+    canvas.flashcard ||
+    canvas.trueFalse ||
     canvas.equation
   ) {
     return true;
@@ -77,10 +93,14 @@ export function TutorShell({
   onCanvasSubmit,
   isGeneratingArticle = false,
   article,
+  initialSidebarCollapsed = false,
   teacherSpeaking,
   onTeacherSpeakingChange,
   onTeacherAudioPendingChange,
   onTeacherInterrupt,
+  isPendingStart = false,
+  isStartingSession = false,
+  onStartClick,
 }: TutorShellProps) {
   const [voiceUnlockRequested, setVoiceUnlockRequested] = useState(false);
   const [teacherSpeechSuspended, setTeacherSpeechSuspended] = useState(false);
@@ -88,12 +108,17 @@ export function TutorShell({
   const showCanvas = snapshot.intake?.status !== 'active';
   const showCanvasScene = showCanvas && hasVisibleCanvasScene(snapshot);
   const canvasOwnsStageImage =
-    snapshot.canvas.mode === 'drawing' &&
-    Boolean(snapshot.canvas.drawing?.backgroundImageUrl);
+    (snapshot.canvas.mode === 'drawing' &&
+      Boolean(snapshot.canvas.drawing?.backgroundImageUrl)) ||
+    (snapshot.canvas.mode === 'image_hotspot' &&
+      Boolean(snapshot.canvas.imageHotspot?.backgroundImageUrl)) ||
+    (snapshot.canvas.mode === 'map_canvas' &&
+      Boolean(snapshot.canvas.mapCanvas?.backgroundImageUrl));
   const showStandaloneImageStage = Boolean(activeImage) && !canvasOwnsStageImage;
   const showStageVisual = showStandaloneImageStage || showCanvasScene;
   const needsVoiceUnlock = voiceEnabled || speechToTextEnabled;
   const voiceControlsArmed = !needsVoiceUnlock || voiceUnlockRequested;
+  const showStartSurface = isPendingStart || isStartingSession;
   const unlockLabel = useMemo(() => {
     if (voiceEnabled && speechToTextEnabled) {
       return 'Enable voice and mic';
@@ -113,10 +138,11 @@ export function TutorShell({
         currentSessionId={snapshot.sessionId}
         isGeneratingArticle={isGeneratingArticle}
         article={article}
+        initialCollapsed={initialSidebarCollapsed}
       />
       {voiceEnabled ? (
         <TutorVoicePlayer
-          enabled={voiceEnabled && voiceControlsArmed}
+          enabled={voiceEnabled && voiceControlsArmed && !isStartingSession}
           text={snapshot.speech}
           provider={ttsProvider}
           modelId={ttsModelId}
@@ -145,123 +171,170 @@ export function TutorShell({
           }}
         />
       ) : null}
-
-      {/* LEFT SIDEBAR - EDITORIAL / PRESENTATION */}
-      <div className="w-full md:w-[480px] lg:w-[540px] h-full flex flex-col border-r border-zinc-200 bg-white z-10 shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
-        <header className="px-8 py-6 flex items-center justify-between border-b border-zinc-100 shrink-0">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
-              Live tutor
-            </p>
-            <p className="mt-1 text-xs font-semibold tracking-widest uppercase text-zinc-900">Live Session</p>
+      {showStartSurface ? (
+        <div
+          data-testid="tutor-start-surface"
+          className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-white"
+        >
+          <div
+            className="absolute inset-0 opacity-[0.4]"
+            style={{
+              backgroundImage: 'radial-gradient(#e5e7eb 1px, transparent 1px)',
+              backgroundSize: '24px 24px',
+            }}
+          ></div>
+          <div className="relative z-10 flex flex-col items-center justify-center gap-6 px-6 text-center animate-in fade-in duration-700">
+            <div className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-400">
+                {isStartingSession ? 'Starting session' : 'Live tutor'}
+              </p>
+              <p className="max-w-xl text-xl font-medium leading-relaxed text-zinc-900 md:text-2xl">
+                {snapshot.speech}
+              </p>
+            </div>
+            {isStartingSession ? (
+              <div className="h-14 w-14 animate-spin rounded-full border-2 border-zinc-200 border-t-zinc-900"></div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setVoiceUnlockRequested(true);
+                  onStartClick?.();
+                }}
+                className="group relative flex items-center justify-center focus:outline-none"
+              >
+                <div className="absolute -inset-4 rounded-full bg-gradient-to-r from-zinc-200 to-zinc-400 opacity-20 blur-xl transition duration-500 group-hover:opacity-40 animate-pulse"></div>
+                <div className="absolute inset-0 rounded-full border border-zinc-200 bg-white shadow-xl transition-transform duration-500 group-hover:scale-105 group-active:scale-95"></div>
+                <div className="relative flex h-40 w-40 items-center justify-center rounded-full bg-zinc-950 text-white shadow-[0_0_40px_rgba(0,0,0,0.1)] transition-transform duration-500 group-hover:scale-110 group-active:scale-95">
+                  <span className="text-xl font-light tracking-[0.2em] uppercase">Start</span>
+                </div>
+              </button>
+            )}
           </div>
-          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500 bg-zinc-50 border border-zinc-100">
-            {snapshot.status === 'completed' ? 'Finished' : 'Active'}
-          </div>
-        </header>
-
-        <main className="flex-1 overflow-y-auto px-8 py-12 scrollbar-hide flex flex-col">
-          <TutorSpeech
-            speech={snapshot.speech}
-            thinking={isSubmittingTurn}
-          />
-
-          {activeImage ? (
-            <section className="mt-16 animate-in fade-in duration-700 md:hidden">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-4">Visual Context</p>
-              <div className="border border-zinc-200 bg-[#FAFAFA] p-3 shadow-sm">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={activeImage.url}
-                  alt={activeImage.altText}
-                  className="w-full h-auto object-cover"
-                />
+        </div>
+      ) : (
+        <>
+          {/* LEFT SIDEBAR - EDITORIAL / PRESENTATION */}
+          <div
+            data-testid="tutor-live-pane"
+            className="w-full md:w-[480px] lg:w-[540px] h-full flex flex-col border-r border-zinc-200 bg-white z-10 shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)]"
+          >
+            <header className="px-8 py-6 flex items-center justify-between border-b border-zinc-100 shrink-0">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
+                  Live tutor
+                </p>
+                <p className="mt-1 text-xs font-semibold tracking-widest uppercase text-zinc-900">Live Session</p>
               </div>
-              <p className="mt-4 text-sm font-light leading-relaxed text-zinc-600">{activeImage.description}</p>
-            </section>
-          ) : null}
-        </main>
+              <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500 bg-zinc-50 border border-zinc-100">
+                {snapshot.status === 'completed' ? 'Finished' : 'Active'}
+              </div>
+            </header>
 
-        <footer className="px-8 py-6 border-t border-zinc-100 bg-white shrink-0">
-          {needsVoiceUnlock && !voiceControlsArmed ? (
-            <button
-              type="button"
-              onClick={() => setVoiceUnlockRequested(true)}
-              className="flex w-full items-center justify-center rounded-full bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800"
-            >
-              {unlockLabel}
-            </button>
-          ) : (
-            <TutorVoiceDock
-              disabled={snapshot.status === 'completed' || isSubmittingTurn}
-              maintainConnection={snapshot.status !== 'completed'}
-              runtimeStatus={runtimeStatus}
-              speechToTextEnabled={speechToTextEnabled && voiceControlsArmed}
-              teacherSpeaking={teacherSpeaking}
-              teacherAudioPending={teacherAudioPending}
-              teacherSpeechText={snapshot.speech}
-              onBargeInStart={() => {
-                setTeacherSpeechSuspended(true);
-              }}
-              onBargeInCancel={() => {
-                setTeacherSpeechSuspended(false);
-              }}
-              onBargeInCommit={() => {
-                setTeacherSpeechSuspended(false);
-                onTeacherInterrupt?.();
-                onTeacherAudioPendingChange?.(false);
-                onTeacherSpeakingChange(false);
-              }}
-              onTranscript={onTranscript}
-            />
-          )}
-        </footer>
-      </div>
+            <main className="flex-1 overflow-y-auto px-8 py-12 scrollbar-hide flex flex-col">
+              <TutorSpeech
+                speech={snapshot.speech}
+                thinking={isSubmittingTurn}
+              />
 
-      {/* RIGHT PANE - INTERACTION */}
-      <div className="hidden md:flex min-w-0 flex-1 h-full overflow-x-hidden overflow-y-auto items-center justify-center relative bg-white">
-         <div className="absolute inset-0 opacity-[0.4]" style={{ backgroundImage: "radial-gradient(#e5e7eb 1px, transparent 1px)", backgroundSize: "24px 24px" }}></div>
-
-         {showStageVisual ? (
-           <div className="relative z-10 flex h-full w-full min-w-0 max-w-5xl flex-col justify-center gap-8 p-6 md:p-8 xl:p-12">
-              {showStandaloneImageStage && activeImage ? (
-                <section
-                  data-testid="active-image-stage"
-                  className="overflow-hidden border border-zinc-200 bg-white shadow-lg animate-in fade-in duration-700"
-                >
-                  <div className="border-b border-zinc-100 px-6 py-4">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
-                      Visual Context
-                    </p>
+              {activeImage ? (
+                <section className="mt-16 animate-in fade-in duration-700 md:hidden">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 mb-4">Visual Context</p>
+                  <div className="border border-zinc-200 bg-[#FAFAFA] p-3 shadow-sm">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={activeImage.url}
+                      alt={activeImage.altText}
+                      className="w-full h-auto object-cover"
+                    />
                   </div>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={activeImage.url}
-                    alt={activeImage.altText}
-                    className="max-h-[34dvh] w-full object-contain bg-[#FAFAFA]"
-                  />
-                  <div className="px-6 py-4">
-                    <p className="text-sm font-light leading-relaxed text-zinc-600">
-                      {activeImage.description}
-                    </p>
-                  </div>
+                  <p className="mt-4 text-sm font-light leading-relaxed text-zinc-600">{activeImage.description}</p>
                 </section>
               ) : null}
+            </main>
 
-              {showCanvasScene ? (
-                <TutorCanvasHost
-                  canvas={snapshot.canvas}
-                  disabled={snapshot.status === 'completed'}
-                  onMoveToken={onMoveToken}
-                  onChooseEquationAnswer={onChooseEquationAnswer}
-                  onFillBlankSubmit={onFillBlankSubmit}
-                  onCodeSubmit={onCodeSubmit}
-                  onCanvasSubmit={onCanvasSubmit}
+            <footer className="px-8 py-6 border-t border-zinc-100 bg-white shrink-0">
+              {needsVoiceUnlock && !voiceControlsArmed ? (
+                <button
+                  type="button"
+                  onClick={() => setVoiceUnlockRequested(true)}
+                  className="flex w-full items-center justify-center rounded-full bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800"
+                >
+                  {unlockLabel}
+                </button>
+              ) : (
+                <TutorVoiceDock
+                  disabled={snapshot.status === 'completed' || isSubmittingTurn}
+                  maintainConnection={snapshot.status !== 'completed'}
+                  runtimeStatus={runtimeStatus}
+                  speechToTextEnabled={speechToTextEnabled && voiceControlsArmed}
+                  teacherSpeaking={teacherSpeaking}
+                  teacherAudioPending={teacherAudioPending}
+                  teacherSpeechText={snapshot.speech}
+                  onBargeInStart={() => {
+                    setTeacherSpeechSuspended(true);
+                  }}
+                  onBargeInCancel={() => {
+                    setTeacherSpeechSuspended(false);
+                  }}
+                  onBargeInCommit={() => {
+                    setTeacherSpeechSuspended(false);
+                    onTeacherInterrupt?.();
+                    onTeacherAudioPendingChange?.(false);
+                    onTeacherSpeakingChange(false);
+                  }}
+                  onTranscript={onTranscript}
                 />
-              ) : null}
-           </div>
-         ) : null}
-      </div>
+              )}
+            </footer>
+          </div>
+
+          {/* RIGHT PANE - INTERACTION */}
+          <div className="hidden md:flex min-w-0 flex-1 h-full overflow-x-hidden overflow-y-auto items-center justify-center relative bg-white">
+             <div className="absolute inset-0 opacity-[0.4]" style={{ backgroundImage: "radial-gradient(#e5e7eb 1px, transparent 1px)", backgroundSize: "24px 24px" }}></div>
+
+             {showStageVisual ? (
+               <div className="relative z-10 flex h-full w-full min-w-0 max-w-5xl flex-col justify-center gap-8 p-6 md:p-8 xl:p-12">
+                  {showStandaloneImageStage && activeImage ? (
+                    <section
+                      data-testid="active-image-stage"
+                      className="overflow-hidden border border-zinc-200 bg-white shadow-lg animate-in fade-in duration-700"
+                    >
+                      <div className="border-b border-zinc-100 px-6 py-4">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
+                          Visual Context
+                        </p>
+                      </div>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={activeImage.url}
+                        alt={activeImage.altText}
+                        className="max-h-[34dvh] w-full object-contain bg-[#FAFAFA]"
+                      />
+                      <div className="px-6 py-4">
+                        <p className="text-sm font-light leading-relaxed text-zinc-600">
+                          {activeImage.description}
+                        </p>
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {showCanvasScene ? (
+                    <TutorCanvasHost
+                      canvas={snapshot.canvas}
+                      disabled={snapshot.status === 'completed'}
+                      onMoveToken={onMoveToken}
+                      onChooseEquationAnswer={onChooseEquationAnswer}
+                      onFillBlankSubmit={onFillBlankSubmit}
+                      onCodeSubmit={onCodeSubmit}
+                      onCanvasSubmit={onCanvasSubmit}
+                    />
+                  ) : null}
+               </div>
+             ) : null}
+          </div>
+        </>
+      )}
     </div>
   );
 }

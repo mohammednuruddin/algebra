@@ -4,6 +4,20 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import type { TutorCanvasState, TutorCodeExecutionResult } from '@/lib/types/tutor';
 import { DrawingCanvas } from '@/components/lesson/drawing-canvas';
 import { TutorCodeEditor } from '@/components/tutor/tutor-code-editor';
+import {
+  ClaimEvidenceBuilderMode,
+  CompareMatrixMode,
+  ContinuousAxisMode,
+  FlashcardMode,
+  ImageHotspotMode,
+  MapCanvasMode,
+  PartWholeBuilderMode,
+  ProcessFlowMode,
+  TimelineMode,
+  TokenBuilderMode,
+  TrueFalseMode,
+  VennDiagramMode,
+} from '@/components/tutor/canvas/extended-canvas-modes';
 import { runPythonCode, type PythonRunResult } from '@/lib/code/python-runner';
 import { resolveLessonImageUrl } from '@/lib/media/media-url';
 
@@ -1011,6 +1025,54 @@ export function TutorCanvasHost({
 
   if (canvas.mode === 'drawing' && canvas.drawing) {
     return <DrawingMode canvas={canvas} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'image_hotspot' && canvas.imageHotspot) {
+    return <ImageHotspotMode canvas={canvas.imageHotspot} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'timeline' && canvas.timeline) {
+    return <TimelineMode canvas={canvas.timeline} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'continuous_axis' && canvas.continuousAxis) {
+    return <ContinuousAxisMode canvas={canvas.continuousAxis} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'venn_diagram' && canvas.vennDiagram) {
+    return <VennDiagramMode canvas={canvas.vennDiagram} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'token_builder' && canvas.tokenBuilder) {
+    return <TokenBuilderMode canvas={canvas.tokenBuilder} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'process_flow' && canvas.processFlow) {
+    return <ProcessFlowMode canvas={canvas.processFlow} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'part_whole_builder' && canvas.partWholeBuilder) {
+    return <PartWholeBuilderMode canvas={canvas.partWholeBuilder} tokens={canvas.tokens} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'map_canvas' && canvas.mapCanvas) {
+    return <MapCanvasMode canvas={canvas.mapCanvas} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'claim_evidence_builder' && canvas.claimEvidenceBuilder) {
+    return <ClaimEvidenceBuilderMode canvas={canvas.claimEvidenceBuilder} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'compare_matrix' && canvas.compareMatrix) {
+    return <CompareMatrixMode canvas={canvas.compareMatrix} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'flashcard' && canvas.flashcard) {
+    return <FlashcardMode canvas={canvas.flashcard} disabled={disabled} onSubmit={onCanvasSubmit} />;
+  }
+
+  if (canvas.mode === 'true_false' && canvas.trueFalse) {
+    return <TrueFalseMode canvas={canvas.trueFalse} disabled={disabled} onSubmit={onCanvasSubmit} />;
   }
 
   if (canvas.mode === 'equation' && canvas.equation) {

@@ -139,4 +139,58 @@ describe('applyTutorCommands', () => {
     expect(first.canvas.drawing?.sceneRevision).toBe(1);
     expect(second.canvas.drawing?.sceneRevision).toBe(2);
   });
+
+  it('applies an image hotspot task and resolves its background image', () => {
+    const result = applyTutorCommands(
+      createEmptyTutorCanvasState(),
+      [
+        {
+          type: 'set_image_hotspot',
+          prompt: 'Tap the nucleus.',
+          imageId: 'img-1',
+          hotspots: [{ id: 'nucleus', label: 'Nucleus', x: 42, y: 38, radius: 10 }],
+        },
+      ],
+      {
+        canvasAction: 'replace',
+        mediaAssets: [
+          {
+            id: 'img-1',
+            url: 'https://example.com/cell.png',
+            altText: 'Cell diagram',
+            description: 'Cell cross section',
+          },
+        ],
+      }
+    );
+
+    expect(result.canvas.mode).toBe('image_hotspot');
+    expect(result.canvas.imageHotspot?.backgroundImageUrl).toBe(
+      'https://example.com/cell.png'
+    );
+    expect(result.canvas.imageHotspot?.hotspots).toHaveLength(1);
+  });
+
+  it('applies a timeline task with preserved learner ordering state', () => {
+    const result = applyTutorCommands(
+      createEmptyTutorCanvasState(),
+      [
+        {
+          type: 'set_timeline',
+          prompt: 'Place the events in order.',
+          items: [
+            { id: 'event-1', label: 'Plant seed', correctPosition: 0 },
+            { id: 'event-2', label: 'Sprout grows', correctPosition: 1 },
+          ],
+        },
+      ],
+      {
+        canvasAction: 'replace',
+      }
+    );
+
+    expect(result.canvas.mode).toBe('timeline');
+    expect(result.canvas.timeline?.items).toHaveLength(2);
+    expect(result.canvas.timeline?.userOrder).toEqual(['event-1', 'event-2']);
+  });
 });

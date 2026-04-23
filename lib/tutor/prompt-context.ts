@@ -159,6 +159,114 @@ export function parseTutorCanvasInteractionFromTranscript(
         strokeCount:
           typeof payload?.strokeCount === 'number' ? payload.strokeCount : undefined,
       };
+    case 'image_hotspot':
+      return Array.isArray(payload?.selectedHotspotIds)
+        ? {
+            mode: 'image_hotspot',
+            selectedHotspotIds: payload.selectedHotspotIds.filter(
+              (value): value is string => typeof value === 'string'
+            ),
+          }
+        : null;
+    case 'timeline':
+      return Array.isArray(payload?.userOrder)
+        ? {
+            mode: 'timeline',
+            userOrder: payload.userOrder.filter(
+              (value): value is string => typeof value === 'string'
+            ),
+          }
+        : null;
+    case 'continuous_axis':
+      return typeof payload?.value === 'number' || payload?.value === null
+        ? {
+            mode: 'continuous_axis',
+            value: (payload?.value as number | null) ?? null,
+          }
+        : null;
+    case 'venn_diagram':
+      return payload?.placements && typeof payload.placements === 'object'
+        ? {
+            mode: 'venn_diagram',
+            placements: Object.fromEntries(
+              Object.entries(payload.placements).filter(
+                ([, value]) => value === 'left' || value === 'overlap' || value === 'right' || value === null
+              )
+            ) as Record<string, 'left' | 'overlap' | 'right' | null>,
+          }
+        : null;
+    case 'token_builder':
+      return Array.isArray(payload?.userTokenIds)
+        ? {
+            mode: 'token_builder',
+            userTokenIds: payload.userTokenIds.filter(
+              (value): value is string => typeof value === 'string'
+            ),
+          }
+        : null;
+    case 'process_flow':
+      return Array.isArray(payload?.userOrder)
+        ? {
+            mode: 'process_flow',
+            userOrder: payload.userOrder.filter(
+              (value): value is string => typeof value === 'string'
+            ),
+          }
+        : null;
+    case 'part_whole_builder':
+      return typeof payload?.filledParts === 'number'
+        ? {
+            mode: 'part_whole_builder',
+            filledParts: payload.filledParts,
+          }
+        : null;
+    case 'map_canvas':
+      return Array.isArray(payload?.selectedPinIds)
+        ? {
+            mode: 'map_canvas',
+            selectedPinIds: payload.selectedPinIds.filter(
+              (value): value is string => typeof value === 'string'
+            ),
+          }
+        : null;
+    case 'claim_evidence_builder':
+      return Array.isArray(payload?.linkedEvidenceIds) || payload?.selectedClaimId === null || typeof payload?.selectedClaimId === 'string'
+        ? {
+            mode: 'claim_evidence_builder',
+            selectedClaimId:
+              typeof payload?.selectedClaimId === 'string' || payload?.selectedClaimId === null
+                ? (payload.selectedClaimId as string | null)
+                : null,
+            linkedEvidenceIds: Array.isArray(payload?.linkedEvidenceIds)
+              ? payload.linkedEvidenceIds.filter(
+                  (value): value is string => typeof value === 'string'
+                )
+              : [],
+          }
+        : null;
+    case 'compare_matrix':
+      return Array.isArray(payload?.selectedCells)
+        ? {
+            mode: 'compare_matrix',
+            selectedCells: payload.selectedCells.filter(
+              (value): value is string => typeof value === 'string'
+            ),
+          }
+        : null;
+    case 'flashcard':
+      return typeof payload?.revealed === 'boolean'
+        ? {
+            mode: 'flashcard',
+            revealed: payload.revealed,
+          }
+        : null;
+    case 'true_false':
+      return typeof payload?.answer === 'boolean' || payload?.answer === null
+        ? {
+            mode: 'true_false',
+            answer: (payload?.answer as boolean | null) ?? null,
+          }
+        : null;
     default:
       return null;
   }
@@ -312,6 +420,127 @@ export function mergeTutorCanvasStateWithInteraction(
         ...canvas,
         drawing: {
           ...canvas.drawing,
+          submitted: true,
+        },
+      };
+    case 'image_hotspot':
+      if (!canvas.imageHotspot) return canvas;
+      return {
+        ...canvas,
+        imageHotspot: {
+          ...canvas.imageHotspot,
+          selectedHotspotIds: canvasInteraction.selectedHotspotIds,
+          submitted: true,
+        },
+      };
+    case 'timeline':
+      if (!canvas.timeline) return canvas;
+      return {
+        ...canvas,
+        timeline: {
+          ...canvas.timeline,
+          userOrder: canvasInteraction.userOrder,
+          submitted: true,
+        },
+      };
+    case 'continuous_axis':
+      if (!canvas.continuousAxis) return canvas;
+      return {
+        ...canvas,
+        continuousAxis: {
+          ...canvas.continuousAxis,
+          userValue: canvasInteraction.value,
+          submitted: true,
+        },
+      };
+    case 'venn_diagram':
+      if (!canvas.vennDiagram) return canvas;
+      return {
+        ...canvas,
+        vennDiagram: {
+          ...canvas.vennDiagram,
+          placements: canvasInteraction.placements,
+          submitted: true,
+        },
+      };
+    case 'token_builder':
+      if (!canvas.tokenBuilder) return canvas;
+      return {
+        ...canvas,
+        tokenBuilder: {
+          ...canvas.tokenBuilder,
+          userTokenIds: canvasInteraction.userTokenIds,
+          submitted: true,
+        },
+      };
+    case 'process_flow':
+      if (!canvas.processFlow) return canvas;
+      return {
+        ...canvas,
+        processFlow: {
+          ...canvas.processFlow,
+          userOrder: canvasInteraction.userOrder,
+          submitted: true,
+        },
+      };
+    case 'part_whole_builder':
+      if (!canvas.partWholeBuilder) return canvas;
+      return {
+        ...canvas,
+        partWholeBuilder: {
+          ...canvas.partWholeBuilder,
+          filledParts: canvasInteraction.filledParts,
+          submitted: true,
+        },
+      };
+    case 'map_canvas':
+      if (!canvas.mapCanvas) return canvas;
+      return {
+        ...canvas,
+        mapCanvas: {
+          ...canvas.mapCanvas,
+          selectedPinIds: canvasInteraction.selectedPinIds,
+          submitted: true,
+        },
+      };
+    case 'claim_evidence_builder':
+      if (!canvas.claimEvidenceBuilder) return canvas;
+      return {
+        ...canvas,
+        claimEvidenceBuilder: {
+          ...canvas.claimEvidenceBuilder,
+          selectedClaimId: canvasInteraction.selectedClaimId,
+          linkedEvidenceIds: canvasInteraction.linkedEvidenceIds,
+          submitted: true,
+        },
+      };
+    case 'compare_matrix':
+      if (!canvas.compareMatrix) return canvas;
+      return {
+        ...canvas,
+        compareMatrix: {
+          ...canvas.compareMatrix,
+          selectedCells: canvasInteraction.selectedCells,
+          submitted: true,
+        },
+      };
+    case 'flashcard':
+      if (!canvas.flashcard) return canvas;
+      return {
+        ...canvas,
+        flashcard: {
+          ...canvas.flashcard,
+          revealed: canvasInteraction.revealed,
+          submitted: true,
+        },
+      };
+    case 'true_false':
+      if (!canvas.trueFalse) return canvas;
+      return {
+        ...canvas,
+        trueFalse: {
+          ...canvas.trueFalse,
+          userAnswer: canvasInteraction.answer,
           submitted: true,
         },
       };
@@ -471,6 +700,143 @@ function canvasStateToContext(
       canvasWidth: canvas.drawing.canvasWidth,
       canvasHeight: canvas.drawing.canvasHeight,
       submitted: canvas.drawing.submitted,
+    };
+  }
+
+  if (canvas.mode === 'image_hotspot' && canvas.imageHotspot) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.imageHotspot.prompt,
+      backgroundImageUrl: canvas.imageHotspot.backgroundImageUrl ?? null,
+      hotspots: canvas.imageHotspot.hotspots,
+      learnerSelection: canvas.imageHotspot.selectedHotspotIds,
+      submitted: canvas.imageHotspot.submitted,
+    };
+  }
+
+  if (canvas.mode === 'timeline' && canvas.timeline) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.timeline.prompt,
+      items: canvas.timeline.items,
+      learnerOrder: canvas.timeline.userOrder,
+      submitted: canvas.timeline.submitted,
+    };
+  }
+
+  if (canvas.mode === 'continuous_axis' && canvas.continuousAxis) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.continuousAxis.prompt,
+      min: canvas.continuousAxis.min,
+      max: canvas.continuousAxis.max,
+      step: canvas.continuousAxis.step,
+      learnerValue: canvas.continuousAxis.userValue,
+      correctValue: canvas.continuousAxis.correctValue ?? null,
+      correctRange: canvas.continuousAxis.correctRange ?? null,
+      submitted: canvas.continuousAxis.submitted,
+    };
+  }
+
+  if (canvas.mode === 'venn_diagram' && canvas.vennDiagram) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.vennDiagram.prompt,
+      leftLabel: canvas.vennDiagram.leftLabel,
+      rightLabel: canvas.vennDiagram.rightLabel,
+      items: canvas.vennDiagram.items,
+      placements: canvas.vennDiagram.placements,
+      submitted: canvas.vennDiagram.submitted,
+    };
+  }
+
+  if (canvas.mode === 'token_builder' && canvas.tokenBuilder) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.tokenBuilder.prompt,
+      tokens: canvas.tokenBuilder.tokens,
+      slots: canvas.tokenBuilder.slots,
+      learnerTokens: canvas.tokenBuilder.userTokenIds,
+      correctTokenIds: canvas.tokenBuilder.correctTokenIds ?? [],
+      submitted: canvas.tokenBuilder.submitted,
+    };
+  }
+
+  if (canvas.mode === 'process_flow' && canvas.processFlow) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.processFlow.prompt,
+      nodes: canvas.processFlow.nodes,
+      learnerOrder: canvas.processFlow.userOrder,
+      submitted: canvas.processFlow.submitted,
+    };
+  }
+
+  if (canvas.mode === 'part_whole_builder' && canvas.partWholeBuilder) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.partWholeBuilder.prompt,
+      totalParts: canvas.partWholeBuilder.totalParts,
+      learnerFilledParts: canvas.partWholeBuilder.filledParts,
+      correctFilledParts: canvas.partWholeBuilder.correctFilledParts ?? null,
+      submitted: canvas.partWholeBuilder.submitted,
+    };
+  }
+
+  if (canvas.mode === 'map_canvas' && canvas.mapCanvas) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.mapCanvas.prompt,
+      backgroundImageUrl: canvas.mapCanvas.backgroundImageUrl ?? null,
+      pins: canvas.mapCanvas.pins,
+      learnerSelection: canvas.mapCanvas.selectedPinIds,
+      submitted: canvas.mapCanvas.submitted,
+    };
+  }
+
+  if (canvas.mode === 'claim_evidence_builder' && canvas.claimEvidenceBuilder) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.claimEvidenceBuilder.prompt,
+      claims: canvas.claimEvidenceBuilder.claims,
+      evidenceItems: canvas.claimEvidenceBuilder.evidenceItems,
+      selectedClaimId: canvas.claimEvidenceBuilder.selectedClaimId,
+      linkedEvidenceIds: canvas.claimEvidenceBuilder.linkedEvidenceIds,
+      submitted: canvas.claimEvidenceBuilder.submitted,
+    };
+  }
+
+  if (canvas.mode === 'compare_matrix' && canvas.compareMatrix) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.compareMatrix.prompt,
+      rows: canvas.compareMatrix.rows,
+      columns: canvas.compareMatrix.columns,
+      selectedCells: canvas.compareMatrix.selectedCells,
+      correctCells: canvas.compareMatrix.correctCells ?? [],
+      submitted: canvas.compareMatrix.submitted,
+    };
+  }
+
+  if (canvas.mode === 'flashcard' && canvas.flashcard) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.flashcard.prompt,
+      front: canvas.flashcard.front,
+      back: canvas.flashcard.back,
+      revealed: canvas.flashcard.revealed,
+      submitted: canvas.flashcard.submitted,
+    };
+  }
+
+  if (canvas.mode === 'true_false' && canvas.trueFalse) {
+    return {
+      mode: canvas.mode,
+      prompt: canvas.trueFalse.prompt,
+      statement: canvas.trueFalse.statement,
+      learnerAnswer: canvas.trueFalse.userAnswer,
+      correctAnswer: canvas.trueFalse.correctAnswer ?? null,
+      submitted: canvas.trueFalse.submitted,
     };
   }
 

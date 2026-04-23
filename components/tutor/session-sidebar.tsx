@@ -1,9 +1,14 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { BookOpen, ChevronLeft, ChevronRight, Plus, Loader2 } from 'lucide-react';
 import { listGuestHistoryItems } from '@/lib/guest/guest-lesson-store';
+import { readJson, writeJson } from '@/lib/guest/guest-storage';
+import {
+  SESSION_SIDEBAR_COLLAPSED_COOKIE,
+  SESSION_SIDEBAR_COLLAPSED_KEY,
+} from '@/lib/tutor/session-sidebar-preference';
 import type { LessonArticleRecord } from '@/lib/types/database';
 
 interface SessionSidebarProps {
@@ -11,6 +16,15 @@ interface SessionSidebarProps {
   isGeneratingArticle?: boolean;
   article?: LessonArticleRecord | null;
   onNewSession?: () => void;
+  initialCollapsed?: boolean;
+}
+
+function writeSidebarCollapsedPreference(nextValue: boolean) {
+  writeJson(SESSION_SIDEBAR_COLLAPSED_KEY, nextValue);
+
+  if (typeof document !== 'undefined') {
+    document.cookie = `${SESSION_SIDEBAR_COLLAPSED_COOKIE}=${nextValue ? '1' : '0'}; path=/; max-age=31536000; samesite=lax`;
+  }
 }
 
 export function SessionSidebar({
@@ -18,8 +32,16 @@ export function SessionSidebar({
   isGeneratingArticle = false,
   article,
   onNewSession,
+  initialCollapsed = false,
 }: SessionSidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() =>
+    readJson(SESSION_SIDEBAR_COLLAPSED_KEY, initialCollapsed)
+  );
+
+  const updateCollapsed = useCallback((nextValue: boolean) => {
+    setCollapsed(nextValue);
+    writeSidebarCollapsedPreference(nextValue);
+  }, []);
 
   const sortedItems = useMemo(() => {
     const items = listGuestHistoryItems();
@@ -34,7 +56,7 @@ export function SessionSidebar({
       <div className="w-12 h-full flex flex-col items-center py-4 bg-zinc-950 border-r border-zinc-800 shrink-0">
         <button
           type="button"
-          onClick={() => setCollapsed(false)}
+          onClick={() => updateCollapsed(false)}
           className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
           aria-label="Expand sidebar"
         >
@@ -69,7 +91,7 @@ export function SessionSidebar({
           )}
           <button
             type="button"
-            onClick={() => setCollapsed(true)}
+            onClick={() => updateCollapsed(true)}
             className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
             aria-label="Collapse sidebar"
           >

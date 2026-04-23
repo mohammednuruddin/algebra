@@ -24,6 +24,9 @@ const VALID_MODES: Set<string> = new Set([
   'distribution', 'equation', 'fill_blank', 'code_block',
   'multiple_choice', 'number_line', 'table_grid', 'graph_plot',
   'matching_pairs', 'ordering', 'text_response', 'drawing',
+  'image_hotspot', 'timeline', 'continuous_axis', 'venn_diagram',
+  'token_builder', 'process_flow', 'part_whole_builder', 'map_canvas',
+  'claim_evidence_builder', 'compare_matrix', 'flashcard', 'true_false',
 ]);
 
 function normalizeMode(value: unknown): TutorCanvasMode {
@@ -94,6 +97,56 @@ function normalizeChoice(
   };
 }
 
+function normalizeTimelineItem(
+  value: Partial<{ id: string; label: string; correctPosition: number }>,
+  index: number
+) {
+  return {
+    id: asTrimmedString(value.id, nextId('item', index)),
+    label: asTrimmedString(value.label, `Item ${index + 1}`),
+    correctPosition:
+      typeof value.correctPosition === 'number' ? value.correctPosition : undefined,
+  };
+}
+
+function normalizeHotspot(
+  value: Partial<{ id: string; label: string; x: number; y: number; radius: number; isCorrect: boolean }>,
+  index: number
+) {
+  return {
+    id: asTrimmedString(value.id, nextId('hotspot', index)),
+    label: asTrimmedString(value.label, `Hotspot ${index + 1}`),
+    x: typeof value.x === 'number' ? value.x : 50,
+    y: typeof value.y === 'number' ? value.y : 50,
+    radius: typeof value.radius === 'number' && value.radius > 0 ? value.radius : 12,
+    isCorrect: value.isCorrect === true,
+  };
+}
+
+function normalizeBuilderToken(
+  value: Partial<{ id: string; label: string; color: string }>,
+  index: number
+) {
+  return {
+    id: asTrimmedString(value.id, nextId('builder_token', index)),
+    label: asTrimmedString(value.label, `Token ${index + 1}`),
+    color: asTrimmedString(value.color, palette[index % palette.length] || '#0f172a'),
+  };
+}
+
+function normalizeMapPin(
+  value: Partial<{ id: string; label: string; x: number; y: number; isCorrect: boolean }>,
+  index: number
+) {
+  return {
+    id: asTrimmedString(value.id, nextId('pin', index)),
+    label: asTrimmedString(value.label, `Pin ${index + 1}`),
+    x: typeof value.x === 'number' ? value.x : 50,
+    y: typeof value.y === 'number' ? value.y : 50,
+    isCorrect: value.isCorrect === true,
+  };
+}
+
 function cloneCanvasState(canvas: TutorCanvasState): TutorCanvasState {
   return {
     ...canvas,
@@ -160,6 +213,81 @@ function cloneCanvasState(canvas: TutorCanvasState): TutorCanvasState {
       : null,
     textResponse: canvas.textResponse ? { ...canvas.textResponse } : null,
     drawing: canvas.drawing ? { ...canvas.drawing } : null,
+    imageHotspot: canvas.imageHotspot
+      ? {
+          ...canvas.imageHotspot,
+          hotspots: canvas.imageHotspot.hotspots.map((hotspot) => ({ ...hotspot })),
+          selectedHotspotIds: [...canvas.imageHotspot.selectedHotspotIds],
+        }
+      : null,
+    timeline: canvas.timeline
+      ? {
+          ...canvas.timeline,
+          items: canvas.timeline.items.map((item) => ({ ...item })),
+          userOrder: [...canvas.timeline.userOrder],
+        }
+      : null,
+    continuousAxis: canvas.continuousAxis
+      ? {
+          ...canvas.continuousAxis,
+          correctRange: canvas.continuousAxis.correctRange
+            ? { ...canvas.continuousAxis.correctRange }
+            : undefined,
+        }
+      : null,
+    vennDiagram: canvas.vennDiagram
+      ? {
+          ...canvas.vennDiagram,
+          items: canvas.vennDiagram.items.map((item) => ({ ...item })),
+          placements: { ...canvas.vennDiagram.placements },
+        }
+      : null,
+    tokenBuilder: canvas.tokenBuilder
+      ? {
+          ...canvas.tokenBuilder,
+          tokens: canvas.tokenBuilder.tokens.map((token) => ({ ...token })),
+          correctTokenIds: canvas.tokenBuilder.correctTokenIds
+            ? [...canvas.tokenBuilder.correctTokenIds]
+            : undefined,
+          userTokenIds: [...canvas.tokenBuilder.userTokenIds],
+        }
+      : null,
+    processFlow: canvas.processFlow
+      ? {
+          ...canvas.processFlow,
+          nodes: canvas.processFlow.nodes.map((node) => ({ ...node })),
+          userOrder: [...canvas.processFlow.userOrder],
+        }
+      : null,
+    partWholeBuilder: canvas.partWholeBuilder ? { ...canvas.partWholeBuilder } : null,
+    mapCanvas: canvas.mapCanvas
+      ? {
+          ...canvas.mapCanvas,
+          pins: canvas.mapCanvas.pins.map((pin) => ({ ...pin })),
+          selectedPinIds: [...canvas.mapCanvas.selectedPinIds],
+        }
+      : null,
+    claimEvidenceBuilder: canvas.claimEvidenceBuilder
+      ? {
+          ...canvas.claimEvidenceBuilder,
+          claims: canvas.claimEvidenceBuilder.claims.map((claim) => ({ ...claim })),
+          evidenceItems: canvas.claimEvidenceBuilder.evidenceItems.map((item) => ({ ...item })),
+          linkedEvidenceIds: [...canvas.claimEvidenceBuilder.linkedEvidenceIds],
+        }
+      : null,
+    compareMatrix: canvas.compareMatrix
+      ? {
+          ...canvas.compareMatrix,
+          rows: canvas.compareMatrix.rows.map((row) => ({ ...row })),
+          columns: canvas.compareMatrix.columns.map((column) => ({ ...column })),
+          selectedCells: [...canvas.compareMatrix.selectedCells],
+          correctCells: canvas.compareMatrix.correctCells
+            ? [...canvas.compareMatrix.correctCells]
+            : undefined,
+        }
+      : null,
+    flashcard: canvas.flashcard ? { ...canvas.flashcard } : null,
+    trueFalse: canvas.trueFalse ? { ...canvas.trueFalse } : null,
   };
 }
 
@@ -247,6 +375,18 @@ export function createEmptyTutorCanvasState(): TutorCanvasState {
     ordering: null,
     textResponse: null,
     drawing: null,
+    imageHotspot: null,
+    timeline: null,
+    continuousAxis: null,
+    vennDiagram: null,
+    tokenBuilder: null,
+    processFlow: null,
+    partWholeBuilder: null,
+    mapCanvas: null,
+    claimEvidenceBuilder: null,
+    compareMatrix: null,
+    flashcard: null,
+    trueFalse: null,
   };
 }
 
@@ -528,6 +668,261 @@ export function applyTutorCommands(
       case 'clear_drawing':
         nextState.drawing = null;
         break;
+      case 'set_image_hotspot': {
+        const hotspots = Array.isArray(command.hotspots)
+          ? command.hotspots.map((hotspot, index) => normalizeHotspot(hotspot, index))
+          : [];
+        nextState.imageHotspot = {
+          prompt: asTrimmedString(command.prompt, 'Tap the correct region.'),
+          backgroundImageUrl: resolveCanvasBackgroundUrl({
+            backgroundImageUrl: command.backgroundImageUrl,
+            mediaAssets: options?.mediaAssets,
+            imageId: command.imageId,
+            imageIndex: command.imageIndex,
+            defaultImageId: options?.defaultImageId,
+          }),
+          hotspots,
+          selectedHotspotIds: [],
+          allowMultiple: command.allowMultiple === true,
+          submitted: false,
+        };
+        nextState.mode = 'image_hotspot';
+        break;
+      }
+      case 'clear_image_hotspot':
+        nextState.imageHotspot = null;
+        break;
+      case 'set_timeline': {
+        const items = Array.isArray(command.items)
+          ? command.items.map((item, index) => normalizeTimelineItem(item, index))
+          : [];
+        nextState.timeline = {
+          prompt: asTrimmedString(command.prompt, 'Place the events in order.'),
+          items,
+          userOrder: items.map((item) => item.id),
+          submitted: false,
+        };
+        nextState.mode = 'timeline';
+        break;
+      }
+      case 'clear_timeline':
+        nextState.timeline = null;
+        break;
+      case 'set_continuous_axis':
+        nextState.continuousAxis = {
+          prompt: asTrimmedString(command.prompt, 'Place the value on the axis.'),
+          min: typeof command.min === 'number' ? command.min : 0,
+          max: typeof command.max === 'number' ? command.max : 10,
+          step: typeof command.step === 'number' && command.step > 0 ? command.step : 1,
+          correctValue:
+            typeof command.correctValue === 'number' ? command.correctValue : undefined,
+          correctRange:
+            command.correctRange &&
+            typeof command.correctRange.min === 'number' &&
+            typeof command.correctRange.max === 'number'
+              ? command.correctRange
+              : undefined,
+          userValue: null,
+          leftLabel: asTrimmedString(command.leftLabel, ''),
+          rightLabel: asTrimmedString(command.rightLabel, ''),
+          submitted: false,
+        };
+        nextState.mode = 'continuous_axis';
+        break;
+      case 'clear_continuous_axis':
+        nextState.continuousAxis = null;
+        break;
+      case 'set_venn_diagram': {
+        const items = Array.isArray(command.items)
+          ? command.items.map((item, index) => ({
+              id: asTrimmedString(item.id, nextId('venn', index)),
+              label: asTrimmedString(item.label, `Item ${index + 1}`),
+              correctRegion: item.correctRegion,
+            }))
+          : [];
+        nextState.vennDiagram = {
+          prompt: asTrimmedString(command.prompt, 'Place the items in the correct region.'),
+          leftLabel: asTrimmedString(command.leftLabel, 'Left'),
+          rightLabel: asTrimmedString(command.rightLabel, 'Right'),
+          items,
+          placements: Object.fromEntries(items.map((item) => [item.id, null])),
+          submitted: false,
+        };
+        nextState.mode = 'venn_diagram';
+        break;
+      }
+      case 'clear_venn_diagram':
+        nextState.vennDiagram = null;
+        break;
+      case 'set_token_builder': {
+        const tokens = Array.isArray(command.tokens)
+          ? command.tokens.map((token, index) => normalizeBuilderToken(token, index))
+          : [];
+        nextState.tokenBuilder = {
+          prompt: asTrimmedString(command.prompt, 'Build the correct expression.'),
+          tokens,
+          slots:
+            typeof command.slots === 'number' && command.slots > 0
+              ? command.slots
+              : tokens.length,
+          correctTokenIds: Array.isArray(command.correctTokenIds)
+            ? command.correctTokenIds.filter((id): id is string => typeof id === 'string')
+            : undefined,
+          userTokenIds: [],
+          submitted: false,
+        };
+        nextState.mode = 'token_builder';
+        break;
+      }
+      case 'clear_token_builder':
+        nextState.tokenBuilder = null;
+        break;
+      case 'set_process_flow': {
+        const nodes = Array.isArray(command.nodes)
+          ? command.nodes.map((node, index) => normalizeTimelineItem(node, index))
+          : [];
+        nextState.processFlow = {
+          prompt: asTrimmedString(command.prompt, 'Arrange the process steps.'),
+          nodes,
+          userOrder: nodes.map((node) => node.id),
+          submitted: false,
+        };
+        nextState.mode = 'process_flow';
+        break;
+      }
+      case 'clear_process_flow':
+        nextState.processFlow = null;
+        break;
+      case 'set_part_whole_builder':
+        nextState.partWholeBuilder = {
+          prompt: asTrimmedString(command.prompt, 'Show the correct share.'),
+          totalParts:
+            typeof command.totalParts === 'number' && command.totalParts > 0
+              ? Math.floor(command.totalParts)
+              : 4,
+          filledParts: 0,
+          correctFilledParts:
+            typeof command.correctFilledParts === 'number'
+              ? Math.floor(command.correctFilledParts)
+              : undefined,
+          label: typeof command.label === 'string' ? command.label : undefined,
+          submitted: false,
+        };
+        nextState.mode = 'part_whole_builder';
+        break;
+      case 'clear_part_whole_builder':
+        nextState.partWholeBuilder = null;
+        break;
+      case 'set_map_canvas': {
+        const pins = Array.isArray(command.pins)
+          ? command.pins.map((pin, index) => normalizeMapPin(pin, index))
+          : [];
+        nextState.mapCanvas = {
+          prompt: asTrimmedString(command.prompt, 'Pick the correct place on the map.'),
+          backgroundImageUrl: resolveCanvasBackgroundUrl({
+            backgroundImageUrl: command.backgroundImageUrl,
+            mediaAssets: options?.mediaAssets,
+            imageId: command.imageId,
+            imageIndex: command.imageIndex,
+            defaultImageId: options?.defaultImageId,
+          }),
+          pins,
+          selectedPinIds: [],
+          allowMultiple: command.allowMultiple === true,
+          submitted: false,
+        };
+        nextState.mode = 'map_canvas';
+        break;
+      }
+      case 'clear_map_canvas':
+        nextState.mapCanvas = null;
+        break;
+      case 'set_claim_evidence_builder': {
+        const claims = Array.isArray(command.claims)
+          ? command.claims.map((claim, index) => ({
+              id: asTrimmedString(claim.id, nextId('claim', index)),
+              label: asTrimmedString(claim.label, `Claim ${index + 1}`),
+              isCorrect: claim.isCorrect === true,
+            }))
+          : [];
+        const evidenceItems = Array.isArray(command.evidenceItems)
+          ? command.evidenceItems.map((item, index) => ({
+              id: asTrimmedString(item.id, nextId('evidence', index)),
+              label: asTrimmedString(item.label, `Evidence ${index + 1}`),
+              supportsClaimId:
+                typeof item.supportsClaimId === 'string' ? item.supportsClaimId : undefined,
+            }))
+          : [];
+        nextState.claimEvidenceBuilder = {
+          prompt: asTrimmedString(command.prompt, 'Pick the claim and supporting evidence.'),
+          claims,
+          evidenceItems,
+          selectedClaimId: null,
+          linkedEvidenceIds: [],
+          submitted: false,
+        };
+        nextState.mode = 'claim_evidence_builder';
+        break;
+      }
+      case 'clear_claim_evidence_builder':
+        nextState.claimEvidenceBuilder = null;
+        break;
+      case 'set_compare_matrix': {
+        const rows = Array.isArray(command.rows)
+          ? command.rows.map((row, index) => ({
+              id: asTrimmedString(row.id, nextId('row', index)),
+              label: asTrimmedString(row.label, `Row ${index + 1}`),
+            }))
+          : [];
+        const columns = Array.isArray(command.columns)
+          ? command.columns.map((column, index) => ({
+              id: asTrimmedString(column.id, nextId('column', index)),
+              label: asTrimmedString(column.label, `Column ${index + 1}`),
+            }))
+          : [];
+        nextState.compareMatrix = {
+          prompt: asTrimmedString(command.prompt, 'Compare the items across the traits.'),
+          rows,
+          columns,
+          selectedCells: [],
+          correctCells: Array.isArray(command.correctCells)
+            ? command.correctCells.filter((cell): cell is string => typeof cell === 'string')
+            : undefined,
+          submitted: false,
+        };
+        nextState.mode = 'compare_matrix';
+        break;
+      }
+      case 'clear_compare_matrix':
+        nextState.compareMatrix = null;
+        break;
+      case 'set_flashcard':
+        nextState.flashcard = {
+          prompt: asTrimmedString(command.prompt, 'Study the card, then flip it.'),
+          front: asTrimmedString(command.front, ''),
+          back: asTrimmedString(command.back, ''),
+          revealed: false,
+          submitted: false,
+        };
+        nextState.mode = 'flashcard';
+        break;
+      case 'clear_flashcard':
+        nextState.flashcard = null;
+        break;
+      case 'set_true_false':
+        nextState.trueFalse = {
+          prompt: asTrimmedString(command.prompt, 'Decide whether the statement is true or false.'),
+          statement: asTrimmedString(command.statement, ''),
+          correctAnswer:
+            typeof command.correctAnswer === 'boolean' ? command.correctAnswer : undefined,
+          userAnswer: null,
+          submitted: false,
+        };
+        nextState.mode = 'true_false';
+        break;
+      case 'clear_true_false':
+        nextState.trueFalse = null;
+        break;
       case 'complete_session':
         sessionComplete = true;
         break;
@@ -596,6 +991,54 @@ export function summarizeTutorCanvas(canvas: TutorCanvasState) {
 
   if (canvas.mode === 'drawing' && canvas.drawing) {
     return `Drawing canvas: ${canvas.drawing.prompt}. Submitted: ${canvas.drawing.submitted}.`;
+  }
+
+  if (canvas.mode === 'image_hotspot' && canvas.imageHotspot) {
+    return `Image hotspot: ${canvas.imageHotspot.prompt}. Selected: ${canvas.imageHotspot.selectedHotspotIds.join(', ') || 'none'}. Submitted: ${canvas.imageHotspot.submitted}.`;
+  }
+
+  if (canvas.mode === 'timeline' && canvas.timeline) {
+    return `Timeline: ${canvas.timeline.prompt}. Order: ${canvas.timeline.userOrder.join(', ') || 'none'}. Submitted: ${canvas.timeline.submitted}.`;
+  }
+
+  if (canvas.mode === 'continuous_axis' && canvas.continuousAxis) {
+    return `Continuous axis [${canvas.continuousAxis.min}–${canvas.continuousAxis.max}]: ${canvas.continuousAxis.prompt}. Learner value: ${canvas.continuousAxis.userValue ?? 'none'}. Submitted: ${canvas.continuousAxis.submitted}.`;
+  }
+
+  if (canvas.mode === 'venn_diagram' && canvas.vennDiagram) {
+    return `Venn diagram: ${canvas.vennDiagram.prompt}. Placed items: ${Object.values(canvas.vennDiagram.placements).filter(Boolean).length}/${canvas.vennDiagram.items.length}. Submitted: ${canvas.vennDiagram.submitted}.`;
+  }
+
+  if (canvas.mode === 'token_builder' && canvas.tokenBuilder) {
+    return `Token builder: ${canvas.tokenBuilder.prompt}. Built tokens: ${canvas.tokenBuilder.userTokenIds.join(', ') || 'none'}. Submitted: ${canvas.tokenBuilder.submitted}.`;
+  }
+
+  if (canvas.mode === 'process_flow' && canvas.processFlow) {
+    return `Process flow: ${canvas.processFlow.prompt}. Order: ${canvas.processFlow.userOrder.join(', ') || 'none'}. Submitted: ${canvas.processFlow.submitted}.`;
+  }
+
+  if (canvas.mode === 'part_whole_builder' && canvas.partWholeBuilder) {
+    return `Part-whole builder: ${canvas.partWholeBuilder.prompt}. Filled: ${canvas.partWholeBuilder.filledParts}/${canvas.partWholeBuilder.totalParts}. Submitted: ${canvas.partWholeBuilder.submitted}.`;
+  }
+
+  if (canvas.mode === 'map_canvas' && canvas.mapCanvas) {
+    return `Map canvas: ${canvas.mapCanvas.prompt}. Selected pins: ${canvas.mapCanvas.selectedPinIds.join(', ') || 'none'}. Submitted: ${canvas.mapCanvas.submitted}.`;
+  }
+
+  if (canvas.mode === 'claim_evidence_builder' && canvas.claimEvidenceBuilder) {
+    return `Claim-evidence builder: ${canvas.claimEvidenceBuilder.prompt}. Claim: ${canvas.claimEvidenceBuilder.selectedClaimId || 'none'}. Evidence links: ${canvas.claimEvidenceBuilder.linkedEvidenceIds.length}. Submitted: ${canvas.claimEvidenceBuilder.submitted}.`;
+  }
+
+  if (canvas.mode === 'compare_matrix' && canvas.compareMatrix) {
+    return `Compare matrix: ${canvas.compareMatrix.prompt}. Selected cells: ${canvas.compareMatrix.selectedCells.length}. Submitted: ${canvas.compareMatrix.submitted}.`;
+  }
+
+  if (canvas.mode === 'flashcard' && canvas.flashcard) {
+    return `Flashcard: ${canvas.flashcard.prompt}. Revealed: ${canvas.flashcard.revealed}. Submitted: ${canvas.flashcard.submitted}.`;
+  }
+
+  if (canvas.mode === 'true_false' && canvas.trueFalse) {
+    return `True/false: ${canvas.trueFalse.statement}. Learner answer: ${canvas.trueFalse.userAnswer === null ? 'none' : canvas.trueFalse.userAnswer ? 'true' : 'false'}. Submitted: ${canvas.trueFalse.submitted}.`;
   }
 
   const zoneSummary = canvas.zones

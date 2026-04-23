@@ -4,11 +4,39 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { TutorShell } from '@/components/tutor/tutor-shell';
 import { useTutorSession } from '@/lib/hooks/use-tutor-session';
+import { createEmptyTutorCanvasState } from '@/lib/tutor/runtime';
 import type {
   TutorCanvasEvidence,
   TutorCanvasInteraction,
   TutorCodeExecutionResult,
+  TutorRuntimeSnapshot,
 } from '@/lib/types/tutor';
+
+function createPendingSnapshot(speech: string): TutorRuntimeSnapshot {
+  return {
+    sessionId: 'pending',
+    prompt: '',
+    lessonTopic: '',
+    learnerLevel: '',
+    lessonOutline: [],
+    status: 'preparing',
+    speech,
+    awaitMode: 'voice',
+    speechRevision: 0,
+    mediaAssets: [],
+    activeImageId: null,
+    canvas: createEmptyTutorCanvasState(),
+    turns: [],
+    intake: null,
+  };
+}
+
+const initialPendingSnapshot = createPendingSnapshot(
+  'Welcome to Algebra. Click Start to begin your lesson.'
+);
+const loadingPendingSnapshot = createPendingSnapshot(
+  'Starting your live tutor. One sec...'
+);
 
 
 type RuntimeConfig = {
@@ -27,7 +55,11 @@ const defaultRuntimeConfig: RuntimeConfig = {
   speechToTextEnabled: false,
 };
 
-export function TutorExperience() {
+export function TutorExperience({
+  initialSidebarCollapsed = false,
+}: {
+  initialSidebarCollapsed?: boolean;
+}) {
   const {
     snapshot,
     phase,
@@ -45,6 +77,8 @@ export function TutorExperience() {
   const [teacherSpeaking, setTeacherSpeaking] = useState(false);
   const [teacherAudioPending, setTeacherAudioPending] = useState(false);
   const [teacherStopSignal, setTeacherStopSignal] = useState(0);
+  const [hasStarted, setHasStarted] = useState(false);
+  const isStartingSession = hasStarted && !snapshot && phase !== 'error';
 
   const submitTranscript = useCallback(
     async (
@@ -268,6 +302,133 @@ export function TutorExperience() {
                   }
                 : null;
             break;
+          case 'image_hotspot':
+            canvasInteraction = {
+              mode: 'image_hotspot',
+              selectedHotspotIds: Array.isArray(payload.selectedHotspotIds)
+                ? payload.selectedHotspotIds.filter(
+                    (value): value is string => typeof value === 'string'
+                  )
+                : [],
+            };
+            break;
+          case 'timeline':
+            canvasInteraction = {
+              mode: 'timeline',
+              userOrder: Array.isArray(payload.userOrder)
+                ? payload.userOrder.filter(
+                    (value): value is string => typeof value === 'string'
+                  )
+                : [],
+            };
+            break;
+          case 'continuous_axis':
+            canvasInteraction = {
+              mode: 'continuous_axis',
+              value:
+                typeof payload.value === 'number' || payload.value === null
+                  ? (payload.value as number | null)
+                  : null,
+            };
+            break;
+          case 'venn_diagram':
+            canvasInteraction =
+              payload.placements && typeof payload.placements === 'object'
+                ? {
+                    mode: 'venn_diagram',
+                    placements: Object.fromEntries(
+                      Object.entries(payload.placements).filter(
+                        ([, value]) =>
+                          value === 'left' ||
+                          value === 'overlap' ||
+                          value === 'right' ||
+                          value === null
+                      )
+                    ) as Record<string, 'left' | 'overlap' | 'right' | null>,
+                  }
+                : null;
+            break;
+          case 'token_builder':
+            canvasInteraction = {
+              mode: 'token_builder',
+              userTokenIds: Array.isArray(payload.userTokenIds)
+                ? payload.userTokenIds.filter(
+                    (value): value is string => typeof value === 'string'
+                  )
+                : [],
+            };
+            break;
+          case 'process_flow':
+            canvasInteraction = {
+              mode: 'process_flow',
+              userOrder: Array.isArray(payload.userOrder)
+                ? payload.userOrder.filter(
+                    (value): value is string => typeof value === 'string'
+                  )
+                : [],
+            };
+            break;
+          case 'part_whole_builder':
+            canvasInteraction =
+              typeof payload.filledParts === 'number'
+                ? {
+                    mode: 'part_whole_builder',
+                    filledParts: payload.filledParts,
+                  }
+                : null;
+            break;
+          case 'map_canvas':
+            canvasInteraction = {
+              mode: 'map_canvas',
+              selectedPinIds: Array.isArray(payload.selectedPinIds)
+                ? payload.selectedPinIds.filter(
+                    (value): value is string => typeof value === 'string'
+                  )
+                : [],
+            };
+            break;
+          case 'claim_evidence_builder':
+            canvasInteraction = {
+              mode: 'claim_evidence_builder',
+              selectedClaimId:
+                typeof payload.selectedClaimId === 'string' || payload.selectedClaimId === null
+                  ? (payload.selectedClaimId as string | null)
+                  : null,
+              linkedEvidenceIds: Array.isArray(payload.linkedEvidenceIds)
+                ? payload.linkedEvidenceIds.filter(
+                    (value): value is string => typeof value === 'string'
+                  )
+                : [],
+            };
+            break;
+          case 'compare_matrix':
+            canvasInteraction = {
+              mode: 'compare_matrix',
+              selectedCells: Array.isArray(payload.selectedCells)
+                ? payload.selectedCells.filter(
+                    (value): value is string => typeof value === 'string'
+                  )
+                : [],
+            };
+            break;
+          case 'flashcard':
+            canvasInteraction =
+              typeof payload.revealed === 'boolean'
+                ? {
+                    mode: 'flashcard',
+                    revealed: payload.revealed,
+                  }
+                : null;
+            break;
+          case 'true_false':
+            canvasInteraction =
+              typeof payload.answer === 'boolean' || payload.answer === null
+                ? {
+                    mode: 'true_false',
+                    answer: (payload.answer as boolean | null) ?? null,
+                  }
+                : null;
+            break;
           default:
             break;
         }
@@ -318,55 +479,48 @@ export function TutorExperience() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!snapshot && phase === 'intake') {
-      queueMicrotask(() => {
-        void startSession();
-      });
-    }
-  }, [phase, snapshot, startSession]);
-
-  if (!snapshot) {
+  if (hasStarted && !snapshot && phase === 'error') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#FAFAFA] px-6 text-zinc-900">
         <div className="w-full max-w-2xl border border-zinc-200 bg-white p-10 shadow-sm">
           <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500">
             Live tutor
           </p>
-          {phase === 'error' ? (
-            <div className="mt-6 space-y-4">
-              <h1 className="text-3xl font-light tracking-tight text-zinc-950">
-                Tutor unavailable right now.
-              </h1>
-              <p className="text-base leading-relaxed text-zinc-600">
-                {error || 'The tutor could not start. Try again.'}
-              </p>
-              <button
-                type="button"
-                onClick={() => void startSession()}
-                className="inline-flex items-center justify-center bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800"
-              >
-                Try again
-              </button>
-            </div>
-          ) : (
-            <div className="mt-6 space-y-4">
-              <h1 className="text-3xl font-light tracking-tight text-zinc-950">
-                Preparing the tutor conversation...
-              </h1>
-              <p className="text-base leading-relaxed text-zinc-600">
-                Starting a live, model-owned intake so the tutor can ask the first question.
-              </p>
-            </div>
-          )}
+          <div className="mt-6 space-y-4">
+            <h1 className="text-3xl font-light tracking-tight text-zinc-950">
+              Tutor unavailable right now.
+            </h1>
+            <p className="text-base leading-relaxed text-zinc-600">
+              {error || 'The tutor could not start. Try again.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => void startSession()}
+              className="inline-flex items-center justify-center bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800"
+            >
+              Try again
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
+  const displaySnapshot = snapshot
+    ? snapshot
+    : isStartingSession
+      ? loadingPendingSnapshot
+      : initialPendingSnapshot;
+
   return (
     <TutorShell
-      snapshot={snapshot}
+      snapshot={displaySnapshot}
+      isPendingStart={!hasStarted}
+      isStartingSession={isStartingSession}
+      onStartClick={() => {
+        setHasStarted(true);
+        void startSession();
+      }}
       isSubmittingTurn={isSubmittingTurn}
       speechToTextEnabled={runtimeConfig.speechToTextEnabled}
       voiceEnabled={runtimeConfig.voiceEnabled}
@@ -384,6 +538,7 @@ export function TutorExperience() {
       onCanvasSubmit={handleCanvasSubmit}
       isGeneratingArticle={isGeneratingArticle}
       article={article}
+      initialSidebarCollapsed={initialSidebarCollapsed}
       teacherSpeaking={teacherSpeaking}
       onTeacherSpeakingChange={setTeacherSpeaking}
       onTeacherAudioPendingChange={setTeacherAudioPending}

@@ -232,6 +232,60 @@ describe('generateTutorTurn', () => {
     vi.stubGlobal('fetch', vi.fn());
   });
 
+  it('teaches the live tutor which canvas to pick and to avoid pushy hype', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  speech: 'Tap the nucleus on the diagram.',
+                  awaitMode: 'voice_or_canvas',
+                  sessionComplete: false,
+                  canvasAction: 'replace',
+                  commands: [],
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    await generateTutorTurn({
+      topic: 'photosynthesis',
+      learnerLevel: 'beginner',
+      outline: ['Identify the chloroplast'],
+      imageAssets: [],
+      activeImageId: null,
+      transcript: 'I am ready.',
+      canvasSummary: '',
+      canvasStateContext: '',
+      latestLearnerTurnContext: '',
+      recentTurnFrames: '',
+      recentTurns: '',
+      canvasTaskPrompt: null,
+      canvasReferenceImageUrl: null,
+      canvasBrushColor: null,
+      canvasEvidence: null,
+    });
+
+    const outbound = vi.mocked(buildOpenRouterRequest).mock.calls.at(-1)?.[0];
+    const systemPrompt = String(outbound?.messages?.[0]?.content ?? '');
+
+    expect(systemPrompt).toMatch(
+      /image_hotspot|timeline|continuous_axis|venn_diagram|token_builder|process_flow/i
+    );
+    expect(systemPrompt).toMatch(/avoid repetitive hype|let's go/i);
+  });
+
   it('tells the live tutor model to end immediately when the learner explicitly wants to stop', async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(
@@ -367,6 +421,54 @@ describe('generateTutorTurn', () => {
     expect(systemPrompt).toMatch(/keep|replace|clear/i);
     expect(systemPrompt).toMatch(/which color to use|brushcolor|red pen/i);
     expect(systemPrompt).not.toMatch(/set_headline|set_instruction/i);
+  });
+
+  it('tells the live tutor model to judge the learner exact answer and direct attention to already shown visuals', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  speech: 'Blue is less likely here, so look at the board with me.',
+                  awaitMode: 'voice_or_canvas',
+                  sessionComplete: false,
+                  commands: [],
+                }),
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    );
+
+    await generateTutorTurn({
+      topic: 'probability',
+      learnerLevel: 'beginner',
+      outline: ['Use one concrete example.', 'Check understanding out loud.'],
+      imageAssets: [],
+      activeImageId: null,
+      transcript: 'Blue',
+      canvasSummary: 'Part-whole board active.',
+      recentTurns:
+        'tutor: There are 3 red marbles and 2 blue marbles. Which color is more likely?\nuser: Blue',
+    });
+
+    const outbound = vi.mocked(buildOpenRouterRequest).mock.calls.at(-1)?.[0];
+    const systemPrompt = String(outbound?.messages?.[0]?.content ?? '');
+
+    expect(systemPrompt).toMatch(/judge the exact answer they gave|do not rewrite/i);
+    expect(systemPrompt).toMatch(/blue.*red|red.*blue/i);
+    expect(systemPrompt).toMatch(/already on screen|tell them where to look|do not ask whether they want to see/i);
+    expect(systemPrompt).toMatch(/set_tokens.*distribution|set_tokens.*token_builder/i);
+    expect(systemPrompt).toMatch(/part_whole_builder.*filled segments|part_whole_builder.*not.*drag/i);
   });
 
   it('sends marked-image evidence back to the tutor model as a multimodal message', async () => {

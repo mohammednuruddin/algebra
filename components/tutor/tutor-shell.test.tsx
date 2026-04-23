@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { TutorShell } from './tutor-shell';
+import { createEmptyTutorCanvasState } from '@/lib/tutor/runtime';
 import type { TutorRuntimeSnapshot } from '@/lib/types/tutor';
 
 const mockTutorVoiceDock = vi.fn((props: unknown) => {
@@ -46,22 +47,9 @@ function buildSnapshot(overrides: Partial<TutorRuntimeSnapshot> = {}): TutorRunt
     mediaAssets: [],
     activeImageId: null,
     canvas: {
-      mode: 'distribution',
+      ...createEmptyTutorCanvasState(),
       headline: 'Tutor workspace',
       instruction: 'Listen and respond.',
-      tokens: [],
-      zones: [],
-      equation: null,
-      fillBlank: null,
-      codeBlock: null,
-      multipleChoice: null,
-      numberLine: null,
-      tableGrid: null,
-      graphPlot: null,
-      matchingPairs: null,
-      ordering: null,
-      textResponse: null,
-      drawing: null,
     },
     turns: [],
     intake: {
@@ -74,6 +62,69 @@ function buildSnapshot(overrides: Partial<TutorRuntimeSnapshot> = {}): TutorRunt
 }
 
 describe('TutorShell', () => {
+  it('treats new canvas modes as visible stage content', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot({
+          intake: null,
+          canvas: {
+            ...createEmptyTutorCanvasState(),
+            mode: 'image_hotspot',
+            imageHotspot: {
+              prompt: 'Tap the nucleus.',
+              backgroundImageUrl: 'https://example.com/cell.png',
+              hotspots: [{ id: 'nucleus', label: 'Nucleus', x: 40, y: 40, radius: 12 }],
+              selectedHotspotIds: [],
+              allowMultiple: false,
+              submitted: false,
+            },
+          },
+        })}
+        speechToTextEnabled={false}
+        voiceEnabled={false}
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_turbo_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking={false}
+        onTeacherSpeakingChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId('canvas-host')).toBeInTheDocument();
+  });
+
+  it('keeps only the centered start surface visible before the live tutor begins', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot({
+          speech: 'Welcome to Algebra. Click Start to begin your lesson.',
+        })}
+        speechToTextEnabled
+        voiceEnabled
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_turbo_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking={false}
+        onTeacherSpeakingChange={vi.fn()}
+        isPendingStart
+      />
+    );
+
+    expect(screen.getByTestId('tutor-start-surface')).toBeInTheDocument();
+    expect(screen.getByText(/welcome to algebra\. click start to begin your lesson\./i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('tutor-live-pane')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('canvas-host')).not.toBeInTheDocument();
+  });
+
   it('suppresses microphone auto-listen while tutor audio is still pending', () => {
     render(
       <TutorShell
@@ -151,6 +202,38 @@ describe('TutorShell', () => {
     expect(screen.getByTestId('voice-dock')).toBeInTheDocument();
     expect(mockTutorVoicePlayer).toHaveBeenLastCalledWith(
       expect.objectContaining({ enabled: true })
+    );
+  });
+
+  it('shows an in-shell loading state after Start is clicked and before the first tutor turn arrives', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot({
+          speech: 'Starting your live tutor. One sec...',
+        })}
+        speechToTextEnabled
+        voiceEnabled
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_turbo_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking={false}
+        onTeacherSpeakingChange={vi.fn()}
+        isStartingSession
+      />
+    );
+
+    expect(
+      screen.getAllByText(/starting your live tutor\. one sec/i).length
+    ).toBeGreaterThan(0);
+    expect(screen.getByTestId('tutor-start-surface')).toBeInTheDocument();
+    expect(screen.queryByTestId('tutor-live-pane')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('voice-dock')).not.toBeInTheDocument();
+    expect(mockTutorVoicePlayer).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false })
     );
   });
 
@@ -275,6 +358,53 @@ describe('TutorShell', () => {
               canvasHeight: 600,
               brushColor: '#000000',
               brushSize: 3,
+              submitted: false,
+            },
+          },
+        })}
+        speechToTextEnabled={false}
+        voiceEnabled={false}
+        ttsProvider="elevenlabs"
+        ttsModelId="eleven_turbo_v2_5"
+        teacherVoiceId="voice-1"
+        runtimeStatus="ready"
+        onTranscript={vi.fn()}
+        onMoveToken={vi.fn()}
+        onChooseEquationAnswer={vi.fn()}
+        teacherSpeaking={false}
+        onTeacherSpeakingChange={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTestId('active-image-stage')).not.toBeInTheDocument();
+    expect(screen.getByTestId('canvas-host')).toBeInTheDocument();
+  });
+
+  it('hides the standalone image stage when image hotspot mode already owns the image', () => {
+    render(
+      <TutorShell
+        snapshot={buildSnapshot({
+          intake: null,
+          mediaAssets: [
+            {
+              id: 'img-1',
+              url: 'https://example.com/curve.png',
+              altText: 'Gradient descent curve',
+              description: 'Ball rolling downhill',
+            },
+          ],
+          activeImageId: 'img-1',
+          canvas: {
+            ...buildSnapshot().canvas,
+            mode: 'image_hotspot',
+            imageHotspot: {
+              prompt: 'Tap where the ball rolls next.',
+              backgroundImageUrl: 'https://example.com/curve.png',
+              hotspots: [
+                { id: 'downhill', label: 'Downhill', x: 70, y: 60, radius: 15 },
+              ],
+              selectedHotspotIds: [],
+              allowMultiple: false,
               submitted: false,
             },
           },
