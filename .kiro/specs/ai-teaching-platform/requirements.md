@@ -173,9 +173,9 @@ The AI Teaching Platform is a voice-first, agentic web application that provides
 
 #### Acceptance Criteria
 
-1. WHEN the Backend generates teacher speech, THE System SHALL use ElevenLabs TTS API with Eleven Turbo v2.5 model for fast, natural voice output
-2. THE System SHALL support learner speech transcription using AssemblyAI
-3. WHEN voice input is processed, THE System SHALL transcribe speech to text through AssemblyAI before sending the turn to the tutor runtime
+1. WHEN the Backend generates teacher speech, THE System SHALL use ElevenLabs TTS API with Eleven Flash v2.5 model for fast, natural voice output
+2. THE System SHALL support learner speech transcription using ElevenLabs Scribe
+3. WHEN voice input is processed, THE System SHALL transcribe speech to text through ElevenLabs Scribe before sending the turn to the tutor runtime
 4. THE Teacher_Conductor SHALL generate voice text optimized for natural speech synthesis
 5. THE System SHALL use browser-based voice activity detection for learner turn detection and barge-in behavior
 6. THE Frontend SHALL stop or interrupt teacher playback when the learner begins speaking

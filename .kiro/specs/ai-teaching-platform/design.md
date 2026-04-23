@@ -40,7 +40,7 @@ The system is built on Next.js (App Router), React, TypeScript, and Tailwind for
 
 **Text-to-Speech (Teacher Voice Output):**
 - **Service**: ElevenLabs TTS API
-- **Model**: Eleven Turbo v2.5 (fastest, lowest latency)
+- **Model**: Eleven Flash v2.5 (fastest, lowest latency)
 - **Voice**: `hpp4J3VqNfWAUOO0d1Us`
 - **Settings**:
   - Stability: 0.5 (balanced)
@@ -49,12 +49,13 @@ The system is built on Next.js (App Router), React, TypeScript, and Tailwind for
   - Use Speaker Boost: true
 
 **Speech-to-Text (Learner Voice Input):**
-- **Service**: AssemblyAI
-- **Model**: Universal speech models through the AssemblyAI transcription API
+- **Service**: ElevenLabs Scribe
+- **Model**: Scribe V2 Realtime
 - **Features**:
-  - Turn transcription after browser VAD detects speech end
+  - Real-time transcription with partial and committed transcripts
   - Automatic punctuation
-  - Reliable server-side transcript finalization
+  - Browser-based with single-use token security
+  - Low-latency streaming transcription
 
 **Voice Activity Detection (VAD):**
 - **Implementation**: `@ricky0123/vad-react` with Silero VAD assets in the browser

@@ -55,7 +55,7 @@ describe('VoiceInput', () => {
     }) as typeof global.fetch;
   });
 
-  it('renders a microphone button for the AssemblyAI + VAD flow', () => {
+  it('renders a microphone button for the ElevenLabs + VAD flow', () => {
     render(<VoiceInput onTranscript={mockOnTranscript} />);
 
     expect(
@@ -96,7 +96,7 @@ describe('VoiceInput', () => {
     await waitFor(() => {
       expect(mockEncodeWav).toHaveBeenCalled();
       expect(global.fetch).toHaveBeenCalledWith(
-        '/api/assemblyai/transcribe',
+        '/api/elevenlabs/transcribe',
         expect.objectContaining({
           method: 'POST',
           body: expect.any(FormData),

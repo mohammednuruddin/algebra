@@ -35,6 +35,9 @@ This keeps the intake behavior closer to the live tutor architecture:
 - Tutor responses now carry only the main spoken line plus turn-control fields.
   The tutor model prompt, parser, and snapshot contract no longer include
   helper text or title.
+- Intake snapshots now also carry the next expected handoff action so the UI
+  can distinguish normal "thinking" from the final "preparing your lesson"
+  transition.
 - No new fallback prompts were added for the scripted intake.
 - Existing lesson-start fallbacks still exist in the tutor model for broader
   session resilience, but the removed onboarding wizard no longer supplies the

@@ -18,7 +18,16 @@ export interface DrawingCanvasProps {
   width?: number;
   height?: number;
   backgroundImage?: HTMLImageElement | null;
-  onSnapshot?: (dataUrl: string) => void;
+  onSnapshot?: (
+    dataUrl: string,
+    metadata?: {
+      overlayDataUrl: string;
+      strokeColors: string[];
+      strokeCount: number;
+      canvasWidth: number;
+      canvasHeight: number;
+    }
+  ) => void;
   disabled?: boolean;
 }
 
@@ -138,9 +147,47 @@ export function DrawingCanvas({
       pixelRatio: 2,
       mimeType: 'image/png',
     });
+    const overlayCanvas = document.createElement('canvas');
+    overlayCanvas.width = width;
+    overlayCanvas.height = height;
+    const overlayContext = overlayCanvas.getContext('2d');
 
-    onSnapshot(dataUrl);
-  }, [onSnapshot]);
+    if (!overlayContext) {
+      onSnapshot(dataUrl);
+      return;
+    }
+
+    for (const line of lines) {
+      if (line.points.length < 2) {
+        continue;
+      }
+
+      overlayContext.save();
+      overlayContext.beginPath();
+      overlayContext.moveTo(line.points[0] || 0, line.points[1] || 0);
+
+      for (let index = 2; index < line.points.length; index += 2) {
+        overlayContext.lineTo(line.points[index] || 0, line.points[index + 1] || 0);
+      }
+
+      overlayContext.strokeStyle = line.strokeColor;
+      overlayContext.lineWidth = line.strokeWidth;
+      overlayContext.lineCap = 'round';
+      overlayContext.lineJoin = 'round';
+      overlayContext.globalCompositeOperation =
+        line.tool === 'eraser' ? 'destination-out' : 'source-over';
+      overlayContext.stroke();
+      overlayContext.restore();
+    }
+
+    onSnapshot(dataUrl, {
+      overlayDataUrl: overlayCanvas.toDataURL('image/png'),
+      strokeColors: Array.from(new Set(lines.map((line) => line.strokeColor))),
+      strokeCount: lines.length,
+      canvasWidth: width,
+      canvasHeight: height,
+    });
+  }, [height, lines, onSnapshot, width]);
 
   return (
     <div className="flex flex-col space-y-4">
@@ -213,10 +260,11 @@ export function DrawingCanvas({
               <button
                 onClick={handleSnapshot}
                 disabled={disabled}
-                className="p-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Capture Snapshot"
+                className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title="Submit Markup"
               >
                 <Camera className="w-5 h-5" />
+                <span>Submit Markup</span>
               </button>
             </>
           )}

@@ -16,7 +16,7 @@ interface OnboardingIntakeProps {
   speechToTextEnabled?: boolean;
   runtimeStatus: 'loading' | 'ready' | 'error';
   voiceEnabled?: boolean;
-  ttsProvider: 'inworld' | 'elevenlabs';
+  ttsProvider: 'elevenlabs';
   ttsModelId: string;
   teacherVoiceId: string;
 }
@@ -74,6 +74,8 @@ export function OnboardingIntake({
   const [topic, setTopic] = useState('');
   const [learnerLevel, setLearnerLevel] = useState('');
   const [teacherSpeaking, setTeacherSpeaking] = useState(false);
+  const [teacherSpeechSuspended, setTeacherSpeechSuspended] = useState(false);
+  const [teacherStopSignal, setTeacherStopSignal] = useState(0);
   
   const promptText = useMemo(() => stageSpeech(stage, topic), [stage, topic]);
   const playToken = useMemo(() => {
@@ -108,9 +110,20 @@ export function OnboardingIntake({
           modelId={ttsModelId}
           voiceId={teacherVoiceId}
           playToken={playToken}
-          onStart={() => setTeacherSpeaking(true)}
-          onComplete={() => setTeacherSpeaking(false)}
-          onError={() => setTeacherSpeaking(false)}
+          paused={teacherSpeechSuspended}
+          stopSignal={teacherStopSignal}
+          onStart={() => {
+            setTeacherSpeechSuspended(false);
+            setTeacherSpeaking(true);
+          }}
+          onComplete={() => {
+            setTeacherSpeechSuspended(false);
+            setTeacherSpeaking(false);
+          }}
+          onError={() => {
+            setTeacherSpeechSuspended(false);
+            setTeacherSpeaking(false);
+          }}
         />
       ) : null}
 
@@ -248,9 +261,22 @@ export function OnboardingIntake({
             <div className="border-t border-zinc-100 pt-6">
               <TutorVoiceDock
                 disabled={isPreparing}
+                maintainConnection
                 runtimeStatus={runtimeStatus}
                 speechToTextEnabled={speechToTextEnabled}
                 teacherSpeaking={teacherSpeaking}
+                teacherSpeechText={isPreparing ? 'Hold on while I prepare this lesson for you.' : promptText}
+                onBargeInStart={() => {
+                  setTeacherSpeechSuspended(true);
+                }}
+                onBargeInCancel={() => {
+                  setTeacherSpeechSuspended(false);
+                }}
+                onBargeInCommit={() => {
+                  setTeacherSpeechSuspended(false);
+                  setTeacherSpeaking(false);
+                  setTeacherStopSignal((value) => value + 1);
+                }}
                 onTranscript={handleTranscript}
               />
             </div>

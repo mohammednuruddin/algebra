@@ -4,6 +4,7 @@ import type {
   SessionSummary,
   TeacherResponse,
 } from '@/lib/types/lesson';
+import type { TutorContinuationContext } from '@/lib/types/tutor';
 import type { LessonArticleRecord } from '@/lib/types/database';
 import { getGuestId } from './guest-id';
 import { readJson, writeJson } from './guest-storage';
@@ -32,6 +33,7 @@ export type GuestLessonRecord = {
   turns: GuestLessonTurn[];
   summary: SessionSummary | null;
   article: LessonArticleRecord | null;
+  continuationContext: TutorContinuationContext | null;
 };
 
 export type GuestHistoryItem = {
@@ -48,6 +50,11 @@ export type GuestHistoryItem = {
     first_image_url?: string;
   } | null;
 };
+
+function extractFirstMarkdownImage(markdown: string) {
+  const match = markdown.match(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/);
+  return match?.[1] ?? null;
+}
 
 function readLessons() {
   return readJson<GuestLessonRecord[]>(GUEST_LESSONS_KEY, []);
@@ -91,6 +98,7 @@ export function createGuestLesson(topicPrompt: string): GuestLessonRecord {
     turns: [],
     summary: null,
     article: null,
+    continuationContext: null,
   };
 }
 
@@ -134,17 +142,38 @@ export function appendGuestLessonTurn(
 export function listGuestHistoryItems(): GuestHistoryItem[] {
   return listGuestLessons()
     .filter((lesson) => lesson.article)
-    .map((lesson) => ({
-      id: lesson.article!.id,
-      title: lesson.article!.title,
-      created_at: lesson.article!.created_at,
-      metadata_json:
-        (lesson.article!.metadata_json as GuestHistoryItem['metadata_json']) ?? null,
-    }));
+    .map((lesson) => {
+      const metadata = (lesson.article!.metadata_json as GuestHistoryItem['metadata_json']) ?? {};
+      const firstImageUrl =
+        metadata.first_image_url ||
+        lesson.mediaAssets?.[0]?.url ||
+        extractFirstMarkdownImage(lesson.article!.article_markdown);
+
+      return {
+        id: lesson.article!.id,
+        title: lesson.article!.title,
+        created_at: lesson.article!.created_at,
+        metadata_json: {
+          ...metadata,
+          first_image_url: firstImageUrl ?? undefined,
+        },
+      };
+    });
 }
 
 export function getGuestArticle(articleId: string) {
   return (
     listGuestLessons().find((lesson) => lesson.article?.id === articleId)?.article ?? null
   );
+}
+
+export function getGuestContinuationContextByArticleId(articleId: string) {
+  return (
+    listGuestLessons().find((lesson) => lesson.article?.id === articleId)?.continuationContext ??
+    null
+  );
+}
+
+export function getGuestLessonByArticleId(articleId: string) {
+  return listGuestLessons().find((lesson) => lesson.article?.id === articleId) ?? null;
 }

@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AudioWaveform, Loader2, Mic, Square } from 'lucide-react';
 import {
-  ASSEMBLY_STREAM_SAMPLE_RATE,
-  buildAssemblyAiStreamingQuery,
-  resolveAssemblyAiCompletedTranscript,
-  type AssemblyAiTurnMessage,
-} from '@/lib/stt/assemblyai-streaming';
+  ELEVENLABS_SCRIBE_SAMPLE_RATE,
+  buildElevenLabsScribeRealtimeUrl,
+  encodePcm16ChunkToBase64,
+  resolveElevenLabsCommittedTranscript,
+  type ElevenLabsScribeMessage,
+} from '@/lib/stt/elevenlabs-scribe';
 
 interface VoiceDockProps {
   disabled?: boolean;
@@ -20,12 +21,10 @@ interface VoiceDockProps {
   onSpeechStart?: () => void;
 }
 
-const STREAM_QUERY = buildAssemblyAiStreamingQuery();
-
 function downsampleToInt16(
   samples: Float32Array,
   inputSampleRate: number,
-  outputSampleRate = ASSEMBLY_STREAM_SAMPLE_RATE
+  outputSampleRate = ELEVENLABS_SCRIBE_SAMPLE_RATE
 ) {
   if (inputSampleRate === outputSampleRate) {
     const pcm = new Int16Array(samples.length);
@@ -139,9 +138,6 @@ export function VoiceDock({
     websocketRef.current = null;
     if (websocket) {
       try {
-        if (websocket.readyState === WebSocket.OPEN) {
-          websocket.send(JSON.stringify({ type: 'Terminate' }));
-        }
         websocket.close();
       } catch {
         // noop
@@ -182,7 +178,7 @@ export function VoiceDock({
     stoppingRef.current = false;
 
     try {
-      const tokenResponse = await fetch('/api/assemblyai/token', {
+      const tokenResponse = await fetch('/api/elevenlabs/token', {
         cache: 'no-store',
       });
       const tokenPayload = (await tokenResponse.json()) as {
@@ -217,10 +213,7 @@ export function VoiceDock({
       processorNode.connect(audioContext.destination);
       sourceNode.connect(processorNode);
 
-      const websocket = new WebSocket(
-        `wss://streaming.assemblyai.com/v3/ws?${STREAM_QUERY.toString()}&token=${encodeURIComponent(tokenPayload.token)}`
-      );
-      websocket.binaryType = 'arraybuffer';
+      const websocket = new WebSocket(buildElevenLabsScribeRealtimeUrl(tokenPayload.token));
 
       mediaStreamRef.current = mediaStream;
       audioContextRef.current = audioContext;
@@ -242,20 +235,23 @@ export function VoiceDock({
           return;
         }
 
-        const payload = JSON.parse(String(event.data)) as AssemblyAiTurnMessage;
+        const payload = JSON.parse(String(event.data)) as ElevenLabsScribeMessage;
+        const nextTranscript = payload.text?.trim() || '';
+        if (nextTranscript) {
+          setTranscript(nextTranscript);
+        }
 
-        if (payload.type === 'Turn') {
-          const nextTranscript = payload.transcript?.trim() || '';
-          if (nextTranscript) {
-            setTranscript(nextTranscript);
-          }
+        const completedTranscript = resolveElevenLabsCommittedTranscript(payload);
+        if (completedTranscript) {
+          setStreamingState('transcribing');
+          await stopStreaming('idle');
+          onTranscript(completedTranscript);
+          return;
+        }
 
-          const completedTranscript = resolveAssemblyAiCompletedTranscript(payload);
-          if (completedTranscript) {
-            setStreamingState('transcribing');
-            await stopStreaming('idle');
-            onTranscript(completedTranscript);
-          }
+        if (payload.message_type && payload.error) {
+          setError(payload.error);
+          await stopStreaming('idle');
         }
       };
 
@@ -290,7 +286,14 @@ export function VoiceDock({
         }
 
         const pcm = downsampleToInt16(input, audioContext.sampleRate);
-        websocket.send(pcm.buffer);
+        websocket.send(
+          JSON.stringify({
+            message_type: 'input_audio_chunk',
+            audio_base_64: encodePcm16ChunkToBase64(pcm),
+            commit: false,
+            sample_rate: ELEVENLABS_SCRIBE_SAMPLE_RATE,
+          })
+        );
       };
     } catch (streamError) {
       if (mountedRef.current) {
@@ -423,7 +426,7 @@ export function VoiceDock({
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-400">
             <span>Learner voice dock</span>
             <span className="text-slate-600">•</span>
-            <span>Assembly streaming</span>
+            <span>ElevenLabs Scribe</span>
             <span className="text-slate-600">•</span>
             <span>{voiceEnabled ? 'teacher voice on' : 'teacher text only'}</span>
           </div>

@@ -13,7 +13,7 @@ The voice integration provides:
 
 ### VoiceInput
 
-Real-time speech-to-text component using ElevenLabs Scribe.
+Voice input component using ElevenLabs Scribe.
 
 **Features:**
 - Real-time transcription with partial and committed transcripts
@@ -43,7 +43,7 @@ import { VoiceInput } from '@/components/lesson';
 Text-to-speech component using ElevenLabs TTS API.
 
 **Features:**
-- Natural voice synthesis with Eleven Turbo v2.5 model
+- Natural voice synthesis with Eleven Flash v2.5 model
 - Configurable voice settings (stability, similarity, style)
 - Play/pause/stop controls
 - Mute/unmute functionality
@@ -107,7 +107,6 @@ import { VoiceInterface } from '@/components/lesson';
 Generates single-use tokens for ElevenLabs Scribe (STT).
 
 **Security:**
-- Requires authentication
 - Never exposes API key to client
 - Tokens expire quickly
 
@@ -135,7 +134,7 @@ Content-Type: application/json
 {
   "text": "Hello world",
   "voiceId": "JBFqnCBsd6RMkjVDRZzb",
-  "modelId": "eleven_turbo_v2_5",
+  "modelId": "eleven_flash_v2_5",
   "voiceSettings": {
     "stability": 0.5,
     "similarityBoost": 0.75,
@@ -149,6 +148,25 @@ Content-Type: application/json
 ```
 Content-Type: audio/mpeg
 [Audio data as MP3]
+```
+
+### Batch transcription fallback: `/api/elevenlabs/transcribe`
+
+Handles short uploaded learner clips and barge-in fallback audio with ElevenLabs speech-to-text.
+
+**Request:**
+```
+POST /api/elevenlabs/transcribe
+Content-Type: multipart/form-data
+
+audio=<wav file>
+```
+
+**Response:**
+```json
+{
+  "transcript": "spoken learner text"
+}
 ```
 
 ## Configuration
@@ -171,7 +189,7 @@ Default voice settings optimized for teaching:
 ### Models
 
 - **STT**: `scribe_v2_realtime` - Real-time multilingual transcription
-- **TTS**: `eleven_turbo_v2_5` - Fast, natural voice synthesis
+- **TTS**: `eleven_flash_v2_5` - Fast, natural voice synthesis
 
 ## Architecture
 
@@ -193,6 +211,7 @@ Default voice settings optimized for teaching:
 │                 │  │
 │  /token         │◄─┘
 │  /tts           │
+│  /transcribe    │
 └─────────────────┘
          │
          │ API Key
@@ -210,8 +229,7 @@ Default voice settings optimized for teaching:
 
 1. **API Key Protection**: Never expose `ELEVENLABS_API_KEY` in client code
 2. **Token-Based Auth**: Use single-use tokens for client-side STT
-3. **User Authentication**: All endpoints require Supabase authentication
-4. **Rate Limiting**: Consider implementing rate limits for API endpoints
+3. **Rate Limiting**: Consider implementing rate limits for API endpoints
 
 ## Testing
 
@@ -227,7 +245,7 @@ npm test -- components/lesson/voice-interface.test.tsx
 This implementation satisfies the following requirements:
 
 - **Requirement 4.1**: Voice input capture ✓
-- **Requirement 12.1**: ElevenLabs TTS with Eleven Turbo v2.5 ✓
+- **Requirement 12.1**: ElevenLabs TTS with Eleven Flash v2.5 ✓
 - **Requirement 12.2**: ElevenLabs Scribe for STT ✓
 - **Requirement 12.3**: Real-time transcription ✓
 - **Requirement 12.4**: Voice text optimized for synthesis ✓
@@ -235,9 +253,6 @@ This implementation satisfies the following requirements:
 - **Requirement 12.6**: VAD for barge-in detection ✓
 - **Requirement 12.7**: ElevenLabs SDK for streaming ✓
 
-## Future Enhancements
-
-- WebSocket streaming for lower latency
 - Voice activity detection improvements
 - Multi-language support
 - Voice cloning for personalized teaching

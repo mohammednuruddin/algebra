@@ -97,6 +97,59 @@ export type LessonTurnUpdate = Partial<Omit<LessonTurnRecord, 'id' | 'session_id
 export type LessonMilestoneProgressUpdate = Partial<Omit<LessonMilestoneProgressRecord, 'id' | 'session_id'>>;
 export type LessonArticleUpdate = Partial<Omit<LessonArticleRecord, 'id' | 'session_id' | 'user_id' | 'created_at'>>;
 
+export type TutorImageGenerationJobSourceType = 'generate' | 'edit';
+export type TutorImageGenerationJobStatus = 'queued' | 'processing' | 'completed' | 'failed';
+
+export interface TutorImageGenerationJobRecord {
+  id: string;
+  session_id: string;
+  prediction_id: string;
+  source_type: TutorImageGenerationJobSourceType;
+  purpose: string;
+  status: TutorImageGenerationJobStatus;
+  prompt: string;
+  source_image_id: string | null;
+  source_image_url: string | null;
+  requested_edits_json: Record<string, unknown> | null;
+  processing_claim_token: string | null;
+  processing_claimed_at: string | null;
+  processing_lease_expires_at: string | null;
+  asset_storage_path: string | null;
+  asset_url: string | null;
+  asset_alt_text: string | null;
+  asset_description: string | null;
+  asset_metadata_json: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+type TutorImageGenerationJobOptionalColumns =
+  | 'source_image_id'
+  | 'source_image_url'
+  | 'requested_edits_json'
+  | 'processing_claim_token'
+  | 'processing_claimed_at'
+  | 'processing_lease_expires_at'
+  | 'asset_storage_path'
+  | 'asset_url'
+  | 'asset_alt_text'
+  | 'asset_description'
+  | 'asset_metadata_json'
+  | 'error_message'
+  | 'completed_at';
+
+export type TutorImageGenerationJobInsert = Omit<
+  TutorImageGenerationJobRecord,
+  'id' | 'created_at' | 'updated_at' | TutorImageGenerationJobOptionalColumns
+> &
+  Partial<Pick<TutorImageGenerationJobRecord, TutorImageGenerationJobOptionalColumns>>;
+
+export type TutorImageGenerationJobUpdate = Partial<
+  Omit<TutorImageGenerationJobRecord, 'id' | 'created_at'>
+>;
+
 // ─── Supabase Client Types ──────────────────────────────────────────────────────
 
 export interface Database {
@@ -131,6 +184,11 @@ export interface Database {
         Row: LessonArticleRecord;
         Insert: LessonArticleInsert;
         Update: LessonArticleUpdate;
+      };
+      tutor_image_generation_jobs: {
+        Row: TutorImageGenerationJobRecord;
+        Insert: TutorImageGenerationJobInsert;
+        Update: TutorImageGenerationJobUpdate;
       };
     };
   };

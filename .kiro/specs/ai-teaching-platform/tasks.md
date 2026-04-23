@@ -299,7 +299,7 @@ Implementation follows a bottom-up approach: infrastructure and data layer first
     - _Requirements: 4.1, 12.2, 12.3, 12.6_
   
   - [x] 18.2 Implement ElevenLabs text-to-speech output
-    - Configure ElevenLabs TTS API with Eleven Turbo v2.5 model
+    - Configure ElevenLabs TTS API with Eleven Flash v2.5 model
     - Implement voice selection and speech rate controls
     - Configure voice settings (stability: 0.5, similarity: 0.75, style: 0.0)
     - Synchronize speech with visual teaching actions
@@ -663,11 +663,12 @@ Implementation follows a bottom-up approach: infrastructure and data layer first
     - Keep guest-local persistence while shifting the UX toward the original voice-first teaching vision
     - _Implementation note: `LessonContainer` now renders a zo-inspired tutor shell instead of the older board/input stack_
 
-  - [x] 36.2 Implement browser VAD + AssemblyAI learner speech flow
-    - Replace ElevenLabs Scribe-based learner STT with browser VAD (`@ricky0123/vad-react`) plus AssemblyAI transcription
+  - [x] 36.2 Implement browser VAD + ElevenLabs Scribe learner speech flow
+    - Use browser VAD (`@ricky0123/vad-react`) for voice activity detection
+    - Integrate ElevenLabs Scribe for real-time transcription
     - Preserve teacher TTS through ElevenLabs and set the default teacher voice to `hpp4J3VqNfWAUOO0d1Us`
     - Interrupt teacher playback when the learner begins speaking
-    - _Implementation note: requires `ASSEMBLYAI_API_KEY`; `ELEVENLABS_API_KEY` remains optional for teacher speech_
+    - _Implementation note: requires `ELEVENLABS_API_KEY` for both teacher speech and learner transcription_
 
   - [x] 36.3 Bundle learner speech with latest canvas context
     - Keep the latest canvas snapshot and interpreted markings ready for the next learner speech/text turn
@@ -684,3 +685,396 @@ Implementation follows a bottom-up approach: infrastructure and data layer first
     - Use `moonshotai/kimi-k2.5:nitro` as the main tutor model through OpenRouter
     - Surface runtime capability flags for STT, TTS, and image search
     - _Implementation note: main tutor model is now documented directly in the lesson shell and env config path_
+
+- [x] 37. Python Code Execution Runtime
+  - [x] 37.1 Integrate Pyodide for browser-based Python execution
+    - Implement `lib/code/python-runner.ts` with Pyodide v0.29.3 loader
+    - Add execution queue to prevent race conditions
+    - Implement stdin/stdout/stderr capture
+    - Add automatic package loading from imports
+    - Implement proper memory management with scope cleanup
+    - Support `input()` via browser prompt
+    - _Files: `lib/code/python-runner.ts`, `lib/code/python-runner.test.ts`_
+  
+  - [x] 37.2 Build code editor with syntax highlighting
+    - Implement `components/tutor/tutor-code-editor.tsx` with CodeMirror
+    - Add Python syntax highlighting
+    - Configure One Dark theme
+    - Add line wrapping and tab indentation support
+    - Integrate with tutor canvas system
+    - _Files: `components/tutor/tutor-code-editor.tsx`_
+
+  - [x] 37.3 Add code block canvas mode
+    - Define `TutorCodeBlockState` type
+    - Implement `set_code_block` and `clear_code_block` commands
+    - Add starter code, user code, and expected output fields
+    - Integrate with Python runner for execution
+    - _Files: `lib/types/tutor.ts`, `lib/tutor/runtime.ts`_
+
+- [x] 38. Live Tutor Image Generation with Replicate
+  - [x] 38.1 Implement background image generation system
+    - Create `lib/media/generated-image-bootstrap.ts` for job planning
+    - Implement `lib/media/generated-image-replicate.ts` for Replicate API
+    - Create `lib/media/generated-image-jobs.ts` for job persistence
+    - Add `tutor_image_generation_jobs` database table
+    - Support both "generate" and "edit" job types
+    - _Documentation: `docs/2026-04-23-live-tutor-image-generation.md`_
+  
+  - [x] 38.2 Build webhook completion handler
+    - Implement `/api/tutor/image-generation/webhook/route.ts`
+    - Verify webhook signatures
+    - Download completed images from Replicate
+    - Upload to Supabase Storage
+    - Generate image descriptions
+    - Update job status in database
+    - _Environment: `REPLICATE_API_TOKEN`, `REPLICATE_WEBHOOK_SECRET`_
+  
+  - [x] 38.3 Implement edit variant system for quizzes
+    - Support label removal for quiz images
+    - Support label swapping for quiz images
+    - Verify edits against original image
+    - Store edit metadata and verification results
+    - Integrate with lesson preparation flow
+    - _Files: `lib/media/generated-image-prompts.ts`, tests_
+
+- [x] 39. Advanced Image Analysis and Understanding
+  - [x] 39.1 Build teaching guidance system
+    - Implement `describeTeachingImage()` in `lib/media/image-analysis.ts`
+    - Generate structured teaching guidance for images
+    - Return summary, key objects, image kind, process indicators
+    - Score child-friendliness and clutter
+    - Provide tutor guidance and suggested use
+    - Use `google/gemini-2.5-flash-lite` via OpenRouter
+  
+  - [x] 39.2 Implement label extraction for quiz planning
+    - Implement `extractEditableImageInventory()`
+    - Extract visible labels and key items from diagrams
+    - Return exact text labels for removal/swapping
+    - Support quiz variant generation
+  
+  - [x] 39.3 Add edit verification system
+    - Implement `verifyEditedImageChanges()`
+    - Compare original and edited images
+    - Verify requested edits were applied correctly
+    - Return verified removals and swaps
+    - Provide teaching suggestions for edited version
+    - _Files: `lib/media/image-analysis.ts`, `lib/media/image-analysis.test.ts`_
+
+- [x] 40. Enhanced Image Search with Serper
+  - [x] 40.1 Integrate Google Images search
+    - Implement `lib/media/lesson-image-search.ts`
+    - Integrate Serper API for Google Images
+    - Filter by image availability and format
+    - Score candidates for teachability
+    - Detect and score clutter
+    - Return top candidates with metadata
+    - _Environment: `SERPER_API_KEY`_
+  
+  - [x] 40.2 Integrate with lesson preparation
+    - Call image search during lesson startup
+    - Describe selected images before tutor sees them
+    - Store image metadata in session
+    - Make images available to tutor model
+    - _Files: `lib/media/lesson-image-search.ts`, `lib/media/lesson-image-search.test.ts`_
+
+- [x] 41. Multimodal Canvas Evidence System
+  - [x] 41.1 Rewrite canvas submission for multimodal evidence
+    - Send learner drawings as image evidence, not text
+    - Submit canvas snapshots as data URLs with metadata
+    - Pass both transcript and visual evidence to model
+    - Enable vision model to see actual drawings
+    - _Documentation: `docs/2026-04-22-multimodal-canvas-evidence-and-canvas-action.md`_
+  
+  - [x] 41.2 Implement explicit canvas lifecycle management
+    - Add `canvasAction: keep | replace | clear` contract
+    - `keep` - preserves current canvas scene
+    - `replace` - starts fresh before applying new commands
+    - `clear` - removes canvas unless new commands rebuild it
+    - Eliminate implicit state carryover bugs
+    - _Files: `lib/types/tutor.ts`, `lib/tutor/runtime.ts`_
+  
+  - [x] 41.3 Add image-aware drawing setup
+    - Make `set_drawing` resolve background images intelligently
+    - Support `backgroundImageUrl`, `imageId`, `imageIndex`
+    - Fall back to currently active stage image
+    - Enable "mark this image" interactions
+    - _Files: `lib/tutor/runtime.ts`_
+  
+  - [x] 41.4 Reduce UI noise
+    - Remove generic canvas headlines and instructions
+    - Let tutor speech carry the teaching
+    - Clean up visual experience
+    - _Files: `lib/tutor/model.ts`, `components/tutor/tutor-canvas-host.tsx`_
+
+- [x] 42. Tutor Personality and Behavior Improvements
+  - [x] 42.1 Port Zo-inspired tutor personality
+    - Add explicit personality guidance to all tutor prompts
+    - Make tutor warm, encouraging, emotionally aware
+    - Add light playfulness when appropriate
+    - Show compassion when learner is confused
+    - Use vivid, conversational language
+    - _Documentation: `docs/2026-04-22-live-tutor-personality-port-from-zo.md`_
+    - _Files: `lib/tutor/model.ts`_
+  
+  - [x] 42.2 Implement model-owned lesson ending
+    - Add explicit ending rules to tutor prompt
+    - Direct stop intent → `sessionComplete: true`
+    - Include `complete_session` command
+    - No additional tasks after explicit stop
+    - Support soft mastery ending ("one more or call it a day?")
+    - _Documentation: `docs/2026-04-22-model-owned-lesson-ending.md`_
+    - _Files: `lib/tutor/model.ts`_
+  
+  - [x] 42.3 Implement model-owned tutor intake
+    - Remove hardcoded onboarding wizard
+    - Backend generates first intake question
+    - Learner replies in normal tutor loop
+    - Model asks natural follow-up questions
+    - Lesson starts when model has enough context
+    - _Documentation: `docs/model-owned-tutor-intake.md`_
+
+- [x] 43. Critical Bug Fixes and Production Readiness
+  - [x] 43.1 Fix queued learner turns bug
+    - Add in-memory queue for learner transcripts during in-flight requests
+    - Prevent silent dropping of learner input
+    - Flush queued transcripts after active turn completes
+    - Use newest snapshot from previous response
+    - Add `[tutor:turn_queue]` debug log
+    - _Documentation: `docs/2026-04-22-queued-learner-turns.md`_
+    - _Files: `lib/hooks/use-tutor-session.ts`_
+  
+  - [x] 43.2 Restore enhanced drawing tools
+    - Use shared `DrawingCanvas` component in tutor mode
+    - Provide full toolset: pen, eraser, undo, redo, clear
+    - Remove duplicate image display
+    - Clean single-image stage
+    - _Documentation: `docs/2026-04-22-tutor-drawing-tools-and-article-markdown.md`_
+    - _Files: `components/tutor/tutor-canvas-host.tsx`, `components/tutor/tutor-shell.tsx`_
+  
+  - [x] 43.3 Improve article markdown generation
+    - Strengthen article generation prompt
+    - Require proper markdown structure
+    - Add sections: Overview, Key Ideas, Worked Example, Recap, Practice Prompts
+    - Use bullets, numbered steps, tables, code blocks, math
+    - Generate study-guide quality output
+    - _Files: `app/api/tutor/article/route.ts`_
+  
+  - [x] 43.4 Fix audio/voice issues (6 bugs)
+    - Intake schema barge-in fix
+    - Intro voice startup race
+    - Tutor audio gesture regression
+    - Voice unlock regression
+    - Audio microphone fix
+    - STT VAD reconnection fix
+    - _Documentation: Multiple docs in `docs/` folder_
+  
+  - [x] 43.5 Fix canvas/drawing issues (5 bugs)
+    - Image canvas alignment
+    - Tutor image markup resolution and stage regressions
+    - Tutor markup evidence context
+    - Tutor turn frame and canvas context bundling
+    - Debug history visibility and drawing scene reset
+    - _Documentation: Multiple docs in `docs/` folder_
+  
+  - [x] 43.6 Fix UI/UX issues (4 bugs)
+    - Intake empty content fix
+    - Tutor initial start flow
+    - Tutor prompt answer validation fix
+    - Tutor transcript heuristics removal
+    - _Documentation: Multiple docs in `docs/` folder_
+  
+  - [x] 43.7 Fix article/history issues (3 bugs)
+    - Article page redesign
+    - Lesson history redesign
+    - Tutor article retries
+    - _Documentation: Multiple docs in `docs/` folder_
+
+- [x] 44. Browser VAD and Voice Infrastructure
+  - [x] 44.1 Integrate Silero VAD for browser-based voice detection
+    - Implement `lib/vad/silero-mic-vad.ts`
+    - Add real-time voice activity detection
+    - Support barge-in (interrupt teacher when learner speaks)
+    - Implement turn boundary detection
+    - Low-latency speech start/end detection
+    - _Files: `lib/vad/silero-mic-vad.ts`, `lib/vad/silero-mic-vad.test.ts`_
+  
+  - [x] 44.2 Implement barge-in logic
+    - Create `lib/vad/barge-in-transcription.ts`
+    - Interrupt teacher playback on learner speech
+    - Manage VAD state transitions
+    - _Files: `lib/vad/barge-in-transcription.ts`, `lib/vad/barge-in-transcription.test.ts`_
+  
+  - [x] 44.3 Add VAD engine abstraction
+    - Create `lib/vad/vad-engine.ts`
+    - Abstract VAD implementation details
+    - Support multiple VAD backends
+    - _Documentation: `docs/2026-04-22-live-tutor-silero-vad.md`_
+
+- [x] 45. ElevenLabs Scribe Streaming Transcription
+  - [x] 45.1 Integrate ElevenLabs Scribe for realtime transcription
+    - Implement `lib/stt/elevenlabs-scribe.ts`
+    - WebSocket-based streaming transcription
+    - Real-time partial and committed transcripts
+    - Automatic punctuation
+    - Browser-based with single-use token security
+    - _Environment: `ELEVENLABS_API_KEY`_
+  
+  - [x] 45.2 Implement PCM audio chunking
+    - Create `lib/stt/pcm-chunker.ts`
+    - Chunk audio for streaming
+    - Optimize for WebSocket transmission
+    - _Files: `lib/stt/pcm-chunker.ts`, `lib/stt/pcm-chunker.test.ts`_
+  
+  - [x] 45.3 Add ElevenLabs Scribe API endpoints
+    - Implement `/api/elevenlabs/token/route.ts` for single-use token generation
+    - Implement `/api/elevenlabs/transcribe/route.ts` for transcription
+    - _Documentation: `docs/stt-vad-reconnection-fix.md`_
+
+- [x] 46. Guest Mode and Local Persistence (Implementation Details)
+  - [x] 46.1 Implement guest identity management
+    - Create `lib/guest/guest-id.ts`
+    - Generate and persist guest IDs per browser
+    - No authentication required
+  
+  - [x] 46.2 Build local storage system
+    - Implement `lib/guest/guest-lesson-store.ts`
+    - Store sessions, summaries, articles locally
+    - Create `lib/guest/guest-storage.ts` abstraction
+    - Create `lib/guest/guest-tutor-store.ts` for tutor sessions
+    - _Files: `lib/guest/*.ts`, `lib/guest/guest-lesson-store.test.ts`_
+  
+  - [x] 46.3 Update history and article pages for guest mode
+    - Read from local storage instead of database
+    - Support guest-local lesson history
+    - Cross-device sync intentionally out of scope
+
+- [x] 47. OpenRouter AI Provider Integration (Implementation Details)
+  - [x] 47.1 Build OpenRouter API client
+    - Implement `lib/ai/openrouter.ts`
+    - Support configurable model selection
+    - Separate models for main tutor and image understanding
+    - Server-side API key management
+  
+  - [x] 47.2 Configure environment variables
+    - `OPENROUTER_API_KEY` (required)
+    - `OPENROUTER_MODEL` (optional, defaults to `moonshotai/kimi-k2.5:nitro`)
+    - `OPENROUTER_IMAGE_MODEL` (optional, defaults to `google/gemini-2.5-flash-lite`)
+    - `OPENROUTER_BASE_URL` (optional)
+    - `OPENROUTER_HTTP_REFERER` (optional)
+    - `OPENROUTER_APP_NAME` (optional)
+
+- [x] 48. Tutor Infrastructure and Utilities
+  - [x] 48.1 Implement debug logging system
+    - Create `lib/tutor/debug-log.ts`
+    - Add structured logging for tutor turns
+    - Log learner ingress, canvas evidence, model interactions
+    - Log prefixes: `[tutor:turn]`, `[tutor:turn_queue]`, `[tutor:ingress]`, `[tutor:canvas]`
+    - _Files: `lib/tutor/debug-log.ts`, `lib/tutor/debug-log.test.ts`_
+  
+  - [x] 48.2 Build prompt context builder
+    - Implement `lib/tutor/prompt-context.ts`
+    - Assemble lesson outline, history, current state
+    - Include media asset context
+    - Format canvas evidence
+    - Build multimodal message arrays
+    - Handle image references and token limits
+    - _Files: `lib/tutor/prompt-context.ts`, `lib/tutor/prompt-context.test.ts`_
+  
+  - [x] 48.3 Add continuation system
+    - Implement `lib/tutor/continuation.ts`
+    - Save lesson state for later resumption
+    - Store continuation notes in session snapshots
+    - Resume from previous session state
+  
+  - [x] 48.4 Add session sidebar preferences
+    - Implement `lib/tutor/session-sidebar-preference.ts`
+    - Persist sidebar open/closed state
+    - User-specific preferences
+    - Local storage backed
+
+- [x] 49. UI Component Enhancements
+  - [x] 49.1 Build session sidebar
+    - Create `components/tutor/session-sidebar.tsx`
+    - Collapsible history panel
+    - Turn-by-turn navigation
+    - Visual progress indicators
+    - _Files: `components/tutor/session-sidebar.tsx`, `components/tutor/session-sidebar.test.tsx`_
+  
+  - [x] 49.2 Build immersive tutor shell
+    - Create `components/tutor/tutor-shell.tsx`
+    - Zo-style layout with central stage
+    - Floating voice dock
+    - Progress rail
+    - _Files: `components/tutor/tutor-shell.tsx`, `components/tutor/tutor-shell.test.tsx`_
+  
+  - [x] 49.3 Build tutor experience orchestrator
+    - Create `components/tutor/tutor-experience.tsx`
+    - Orchestrate all tutor interactions
+    - Manage voice, canvas, and text modes
+    - Handle turn submission and queueing
+    - _Files: `components/tutor/tutor-experience.tsx`, `components/tutor/tutor-experience.test.tsx`_
+  
+  - [x] 49.4 Add extended canvas modes
+    - Create `components/tutor/canvas/extended-canvas-modes.tsx`
+    - Additional canvas interaction modes
+    - Specialized drawing tools
+
+- [x] 50. Comprehensive Interactive Canvas Mode System
+  - [x] 50.1 Implement 28 specialized canvas interaction modes
+    - **Mathematical modes (6):** distribution, equation, number_line, graph_plot, continuous_axis, part_whole_builder
+    - **Text/Language modes (4):** fill_blank, text_response, ordering, flashcard
+    - **Logic/Reasoning modes (5):** multiple_choice, true_false, matching_pairs, claim_evidence_builder, compare_matrix
+    - **Visual/Spatial modes (6):** drawing, image_hotspot, map_canvas, venn_diagram, timeline, process_flow
+    - **Advanced modes (7):** code_block, table_grid, token_builder, continuous_axis, part_whole_builder, claim_evidence_builder, compare_matrix
+  
+  - [x] 50.2 Define comprehensive type system for all modes
+    - Create 100+ type definitions in `lib/types/tutor.ts`
+    - Each mode has: state interface, command types, validation rules
+    - Support for correct answers, user input, submission tracking
+    - _Files: `lib/types/tutor.ts`_
+  
+  - [x] 50.3 Implement command processing for all modes
+    - Add `set_[mode]` and `clear_[mode]` commands for each mode
+    - Process mode-specific parameters
+    - Integrate with canvas lifecycle (keep/replace/clear)
+    - Support multimodal submission for all modes
+    - _Files: `lib/tutor/runtime.ts`_
+  
+  - [x] 50.4 Build UI components for each mode
+    - Custom UI for each of 28 modes
+    - State management per mode
+    - Validation and feedback systems
+    - Integration with tutor AI
+    - _Files: Various component files_
+
+- [x] 51. Testing Infrastructure
+  - [x] 51.1 Add comprehensive test coverage (30+ test files)
+    - Tutor runtime and model tests
+    - Media generation and analysis tests
+    - Voice and audio tests
+    - Canvas and drawing tests
+    - API route tests
+    - Component tests
+    - Integration tests
+  
+  - [x] 51.2 Implement test utilities and mocks
+    - Mock AI service responses
+    - Mock external API calls
+    - Test fixtures and factories
+    - Snapshot testing for complex outputs
+
+- [x] 52. Documentation System
+  - [x] 52.1 Create comprehensive documentation (30+ docs)
+    - Feature documentation for major changes
+    - Bug fix documentation with root cause analysis
+    - Architecture decision records
+    - Regression prevention guides
+    - Alternative approaches considered
+    - Testing strategies
+  
+  - [x] 52.2 Organize documentation by category
+    - Live tutor features (10+ docs)
+    - Bug fixes (15+ docs)
+    - Performance optimizations
+    - Architecture decisions
+    - _Location: `docs/` folder_

@@ -106,6 +106,7 @@ describe('DrawingCanvas', () => {
     render(<DrawingCanvas onSnapshot={mockOnSnapshot} />);
 
     expect(screen.getByTestId('camera-icon')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /submit markup/i })).toBeInTheDocument();
   });
 
   it('does not render snapshot button when onSnapshot is not provided', () => {
@@ -231,7 +232,7 @@ describe('DrawingCanvas', () => {
 
     render(<DrawingCanvas onSnapshot={mockOnSnapshot} />);
 
-    const snapshotButton = screen.getByTitle('Capture Snapshot');
+    const snapshotButton = screen.getByTitle('Submit Markup');
     
     // We can't fully test this without mocking the ref, but we can verify the button exists
     expect(snapshotButton).toBeTruthy();

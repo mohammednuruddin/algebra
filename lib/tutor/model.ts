@@ -1,8 +1,17 @@
-import { buildOpenRouterRequest } from '@/lib/ai/openrouter';
-import { shouldAutoStartTutorLesson } from '@/lib/tutor/intake-heuristics';
+import {
+  buildOpenRouterRequest,
+  type OpenRouterContentPart,
+  type OpenRouterMessage,
+} from '@/lib/ai/openrouter';
+import { formatTutorImageContextLine } from '@/lib/media/generated-image-prompts';
+import { buildTutorContinuationPromptContext } from '@/lib/tutor/continuation';
+import { formatTutorDebugMessages, formatTutorDebugValue } from '@/lib/tutor/debug-log';
 import type {
   TutorAwaitMode,
+  TutorCanvasAction,
   TutorCanvasCommand,
+  TutorContinuationContext,
+  TutorCanvasEvidence,
   TutorMediaAsset,
   TutorLlmDebugTrace,
   TutorSessionStatus,
@@ -11,6 +20,7 @@ import type {
 export interface TutorModelResponse {
   speech: string;
   awaitMode: TutorAwaitMode;
+  canvasAction: TutorCanvasAction;
   commands: TutorCanvasCommand[];
   sessionComplete: boolean;
   status: TutorSessionStatus;
@@ -41,10 +51,48 @@ interface TutorLessonPreparation {
   desiredImageCount: number;
 }
 
-type TutorMessage = {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-};
+const LIVE_TUTOR_PERSONALITY_GUIDANCE = [
+  'You are a warm, encouraging, emotionally aware live tutor.',
+  'Avoid robotic worksheet energy; teach like a present human coach.',
+  'Sound like a kind human coach: calm, compassionate, lightly playful when it fits, and never cold or mechanical.',
+  'Meet the learner where they are. If they are confused, frustrated, embarrassed, or stuck, briefly validate that feeling, lower the pressure, and make the next step feel doable.',
+  'If the learner gets something right, celebrate it naturally and move forward with momentum.',
+  'Use short, vivid, conversational phrasing instead of textbook language. You may be gently fun, but do not become cheesy, try-hard, or distracting.',
+  'Vary your encouragement. Do not repeat the same praise formula every turn.',
+  'Do not sound bossy. Guide, coach, reassure, and teach.',
+].join(' ');
+
+const LIVE_TUTOR_PERSONALITY_SHORT_GUIDANCE =
+  'Keep the tutor warm, encouraging, emotionally aware, and lightly playful. Avoid robotic or worksheet-like tone.';
+
+const LIVE_TUTOR_CANVAS_GUIDANCE = [
+  'Use canvas only when it directly helps this exact teaching move; do not force the board for a simple verbal check.',
+  'When the learner gives a short spoken answer such as a color, number, yes or no, or a single option, judge the exact answer they gave. Do not rewrite blue into red or swap their answer before evaluating it.',
+  'If a board or image will already be shown this turn, do not ask whether the learner wants to see it. It is already on screen, so tell them where to look or what to do.',
+  'For identifying, circling, pointing to, tracing, or marking a precise region on a diagram or image, use set_drawing on that same image.',
+  'Choose timeline for chronology, sequence, or ordered stages.',
+  'Choose continuous_axis for values, estimates, intensity, probability, or other continua.',
+  'Choose venn_diagram for overlap, distinction, and classification.',
+  'Choose token_builder for assembling equations, grammar pieces, logic forms, or structured expressions.',
+  'Choose process_flow for chains, cycles, steps, and causal sequences.',
+  'Choose part_whole_builder for fractions, percentages, ratios, and shares.',
+  'Use set_tokens only when those tokens should remain visible on the board, such as distribution or token_builder. part_whole_builder uses filled segments, not token dragging.',
+  'Choose map_canvas for locations, routes, regions, and spatial comparisons.',
+  'Choose claim_evidence_builder for picking a claim and supporting evidence.',
+  'Choose compare_matrix for comparing examples across multiple traits.',
+  'Use flashcard and true_false as lightweight tutor moves, not as a noisy arcade loop.',
+  'When the learner submits board work, inspect the exact evidence, name what is correct, name what is misplaced or missing, and decide the next move from that evidence.',
+  'Avoid repetitive hype language such as constant "let\'s go" phrasing. Keep the tone warm, human, and encouraging without sounding pushy.',
+  'Keep canvas instructions short, concrete, and naturally spoken. Never say generic filler such as "interact with the board to continue."',
+].join(' ');
+
+const LIVE_TUTOR_ALLOWED_COMMANDS =
+  'Allowed commands: set_mode, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, set_fill_blank, clear_fill_blank, set_code_block, clear_code_block, set_multiple_choice, clear_multiple_choice, set_number_line, clear_number_line, set_table_grid, clear_table_grid, set_graph_plot, clear_graph_plot, set_matching_pairs, clear_matching_pairs, set_ordering, clear_ordering, set_text_response, clear_text_response, set_drawing, clear_drawing, set_timeline, clear_timeline, set_continuous_axis, clear_continuous_axis, set_venn_diagram, clear_venn_diagram, set_token_builder, clear_token_builder, set_process_flow, clear_process_flow, set_part_whole_builder, clear_part_whole_builder, set_map_canvas, clear_map_canvas, set_claim_evidence_builder, clear_claim_evidence_builder, set_compare_matrix, clear_compare_matrix, set_flashcard, clear_flashcard, set_true_false, clear_true_false, complete_session.';
+
+const LIVE_TUTOR_CANVAS_MODE_DESCRIPTIONS =
+  'Canvas modes: fill_blank (prompt, beforeText, afterText, slots with placeholder/correctAnswer), code_block (prompt, language, starterCode, expectedOutput), multiple_choice (prompt, options with label/isCorrect, allowMultiple), number_line (prompt, min, max, step, correctValue, showTicks, labels), table_grid (prompt, headers, rows, cells with row/col/value/editable/correctAnswer), graph_plot (prompt, xMin, xMax, yMin, yMax, xLabel, yLabel, gridLines, presetPoints, expectedPoints), matching_pairs (prompt, leftItems, rightItems, correctPairs with leftIndex/rightIndex), ordering (prompt, items with label/correctPosition), text_response (prompt, placeholder, maxLength), drawing (prompt, backgroundImageUrl or imageId or imageIndex, canvasWidth, canvasHeight, brushColor, brushSize), timeline (prompt, items with label/correctPosition), continuous_axis (prompt, min, max, step, correctValue or correctRange, leftLabel, rightLabel), venn_diagram (prompt, leftLabel, rightLabel, items with label/correctRegion), token_builder (prompt, tokens with label/color, slots, correctTokenIds), process_flow (prompt, nodes with label/correctPosition), part_whole_builder (prompt, totalParts, correctFilledParts, label), map_canvas (prompt, backgroundImageUrl or imageId or imageIndex, pins with label/x/y, allowMultiple), claim_evidence_builder (prompt, claims with label/isCorrect, evidenceItems with label/supportsClaimId), compare_matrix (prompt, rows with label, columns with label, correctCells), flashcard (prompt, front, back), true_false (prompt, statement, correctAnswer).';
+
+type TutorMessage = OpenRouterMessage;
 
 type Sanitized<T> = {
   response: T;
@@ -125,6 +173,42 @@ function sanitizeAwaitMode(
   };
 }
 
+function inferCanvasAction(commands: TutorCanvasCommand[]): TutorCanvasAction {
+  if (commands.length === 0) {
+    return 'keep';
+  }
+
+  const imageOnlyCommands = commands.every(
+    (command) => command.type === 'show_image' || command.type === 'clear_image'
+  );
+
+  if (imageOnlyCommands) {
+    return 'clear';
+  }
+
+  return 'replace';
+}
+
+function sanitizeCanvasAction(
+  value: unknown,
+  fallbackAction: TutorCanvasAction
+): { canvasAction: TutorCanvasAction; issue: string | null } {
+  if (value === 'keep' || value === 'replace' || value === 'clear') {
+    return {
+      canvasAction: value,
+      issue: null,
+    };
+  }
+
+  return {
+    canvasAction: fallbackAction,
+    issue:
+      value == null
+        ? null
+        : `Invalid canvasAction ${formatDebugValue(value)} normalized to ${fallbackAction}`,
+  };
+}
+
 function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
   if (!Array.isArray(value)) {
     return [];
@@ -142,10 +226,40 @@ function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
 
     switch (type) {
       case 'set_mode': {
+        const mode = trimmed(command.mode || command.value);
+        if (
+          mode !== 'distribution' &&
+          mode !== 'equation' &&
+          mode !== 'fill_blank' &&
+          mode !== 'code_block' &&
+          mode !== 'multiple_choice' &&
+          mode !== 'number_line' &&
+          mode !== 'table_grid' &&
+          mode !== 'graph_plot' &&
+          mode !== 'matching_pairs' &&
+          mode !== 'ordering' &&
+          mode !== 'text_response' &&
+          mode !== 'drawing' &&
+          mode !== 'image_hotspot' &&
+          mode !== 'timeline' &&
+          mode !== 'continuous_axis' &&
+          mode !== 'venn_diagram' &&
+          mode !== 'token_builder' &&
+          mode !== 'process_flow' &&
+          mode !== 'part_whole_builder' &&
+          mode !== 'map_canvas' &&
+          mode !== 'claim_evidence_builder' &&
+          mode !== 'compare_matrix' &&
+          mode !== 'flashcard' &&
+          mode !== 'true_false'
+        ) {
+          break;
+        }
+
         commands.push({
           type: 'set_mode',
-          mode: command.mode === 'equation' ? 'equation' : 'distribution',
-        });
+          mode,
+        } as TutorCanvasCommand);
         break;
       }
       case 'set_headline': {
@@ -241,6 +355,486 @@ function sanitizeCommands(value: unknown): TutorCanvasCommand[] {
         commands.push({ type: 'complete_session' });
         break;
       }
+      case 'show_image': {
+        commands.push({
+          type: 'show_image',
+          ...(typeof command.imageId === 'string' ? { imageId: command.imageId } : {}),
+          ...(typeof command.imageIndex === 'number' ? { imageIndex: command.imageIndex } : {}),
+        });
+        break;
+      }
+      case 'clear_image': {
+        commands.push({ type: 'clear_image' });
+        break;
+      }
+      case 'set_fill_blank': {
+        commands.push({
+          type: 'set_fill_blank',
+          prompt: trimmed(command.prompt, 'Fill in the blanks.'),
+          beforeText: trimmed(command.beforeText, ''),
+          afterText: trimmed(command.afterText, ''),
+          slots: Array.isArray(command.slots)
+            ? command.slots
+                .filter((s: unknown) => s && typeof s === 'object')
+                .map((s: Record<string, unknown>) => ({
+                  placeholder: trimmed(s.placeholder, 'answer'),
+                  ...(typeof s.id === 'string' ? { id: s.id } : {}),
+                  ...(typeof s.correctAnswer === 'string' ? { correctAnswer: s.correctAnswer } : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_fill_blank': {
+        commands.push({ type: 'clear_fill_blank' });
+        break;
+      }
+      case 'set_code_block': {
+        commands.push({
+          type: 'set_code_block',
+          prompt: trimmed(command.prompt, 'Write your code below.'),
+          language: trimmed(command.language, 'python'),
+          starterCode: trimmed(command.starterCode, ''),
+          ...(typeof command.expectedOutput === 'string' ? { expectedOutput: command.expectedOutput } : {}),
+        });
+        break;
+      }
+      case 'clear_code_block': {
+        commands.push({ type: 'clear_code_block' });
+        break;
+      }
+      case 'set_multiple_choice': {
+        const opts = Array.isArray(command.options)
+          ? command.options
+              .filter((o: unknown) => o && typeof o === 'object')
+              .map((o: Record<string, unknown>) => ({
+                label: trimmed(o.label, 'Option'),
+                ...(o.isCorrect === true ? { isCorrect: true } : {}),
+              }))
+          : [];
+        commands.push({
+          type: 'set_multiple_choice',
+          prompt: trimmed(command.prompt, 'Choose the correct answer.'),
+          options: opts,
+          ...(command.allowMultiple === true ? { allowMultiple: true } : {}),
+        });
+        break;
+      }
+      case 'clear_multiple_choice': {
+        commands.push({ type: 'clear_multiple_choice' });
+        break;
+      }
+      case 'set_number_line': {
+        commands.push({
+          type: 'set_number_line',
+          prompt: trimmed(command.prompt, 'Place the value on the number line.'),
+          min: typeof command.min === 'number' ? command.min : 0,
+          max: typeof command.max === 'number' ? command.max : 10,
+          ...(typeof command.step === 'number' ? { step: command.step } : {}),
+          ...(typeof command.correctValue === 'number' ? { correctValue: command.correctValue } : {}),
+          ...(typeof command.showTicks === 'boolean' ? { showTicks: command.showTicks } : {}),
+          ...(Array.isArray(command.labels) ? { labels: command.labels } : {}),
+        });
+        break;
+      }
+      case 'clear_number_line': {
+        commands.push({ type: 'clear_number_line' });
+        break;
+      }
+      case 'set_table_grid': {
+        commands.push({
+          type: 'set_table_grid',
+          prompt: trimmed(command.prompt, 'Complete the table.'),
+          headers: Array.isArray(command.headers) ? command.headers.map(String) : [],
+          rows: typeof command.rows === 'number' && command.rows > 0 ? command.rows : 2,
+          ...(Array.isArray(command.cells) ? { cells: command.cells } : {}),
+        });
+        break;
+      }
+      case 'clear_table_grid': {
+        commands.push({ type: 'clear_table_grid' });
+        break;
+      }
+      case 'set_graph_plot': {
+        commands.push({
+          type: 'set_graph_plot',
+          prompt: trimmed(command.prompt, 'Plot the points on the graph.'),
+          ...(typeof command.xMin === 'number' ? { xMin: command.xMin } : {}),
+          ...(typeof command.xMax === 'number' ? { xMax: command.xMax } : {}),
+          ...(typeof command.yMin === 'number' ? { yMin: command.yMin } : {}),
+          ...(typeof command.yMax === 'number' ? { yMax: command.yMax } : {}),
+          ...(typeof command.xLabel === 'string' ? { xLabel: command.xLabel } : {}),
+          ...(typeof command.yLabel === 'string' ? { yLabel: command.yLabel } : {}),
+          ...(typeof command.gridLines === 'boolean' ? { gridLines: command.gridLines } : {}),
+          ...(Array.isArray(command.presetPoints) ? { presetPoints: command.presetPoints } : {}),
+          ...(Array.isArray(command.expectedPoints) ? { expectedPoints: command.expectedPoints } : {}),
+        });
+        break;
+      }
+      case 'clear_graph_plot': {
+        commands.push({ type: 'clear_graph_plot' });
+        break;
+      }
+      case 'set_matching_pairs': {
+        commands.push({
+          type: 'set_matching_pairs',
+          prompt: trimmed(command.prompt, 'Match the items.'),
+          leftItems: Array.isArray(command.leftItems)
+            ? command.leftItems.filter((i: unknown) => i && typeof i === 'object').map((i: Record<string, unknown>) => ({ label: trimmed(i.label, 'Item') }))
+            : [],
+          rightItems: Array.isArray(command.rightItems)
+            ? command.rightItems.filter((i: unknown) => i && typeof i === 'object').map((i: Record<string, unknown>) => ({ label: trimmed(i.label, 'Item') }))
+            : [],
+          correctPairs: Array.isArray(command.correctPairs)
+            ? command.correctPairs.filter((p: unknown) => p && typeof p === 'object' && typeof (p as Record<string, unknown>).leftIndex === 'number' && typeof (p as Record<string, unknown>).rightIndex === 'number')
+            : [],
+        });
+        break;
+      }
+      case 'clear_matching_pairs': {
+        commands.push({ type: 'clear_matching_pairs' });
+        break;
+      }
+      case 'set_ordering': {
+        commands.push({
+          type: 'set_ordering',
+          prompt: trimmed(command.prompt, 'Arrange in the correct order.'),
+          items: Array.isArray(command.items)
+            ? command.items
+                .filter((i: unknown) => i && typeof i === 'object')
+                .map((i: Record<string, unknown>) => ({
+                  label: trimmed(i.label, 'Item'),
+                  ...(typeof i.correctPosition === 'number' ? { correctPosition: i.correctPosition } : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_ordering': {
+        commands.push({ type: 'clear_ordering' });
+        break;
+      }
+      case 'set_text_response': {
+        commands.push({
+          type: 'set_text_response',
+          prompt: trimmed(command.prompt, 'Type your answer.'),
+          ...(typeof command.placeholder === 'string' ? { placeholder: command.placeholder } : {}),
+          ...(typeof command.maxLength === 'number' ? { maxLength: command.maxLength } : {}),
+        });
+        break;
+      }
+      case 'clear_text_response': {
+        commands.push({ type: 'clear_text_response' });
+        break;
+      }
+      case 'set_drawing': {
+        commands.push({
+          type: 'set_drawing',
+          prompt: trimmed(command.prompt, 'Draw your answer.'),
+          ...(typeof command.backgroundImageUrl === 'string' ? { backgroundImageUrl: command.backgroundImageUrl } : {}),
+          ...(typeof command.imageId === 'string' ? { imageId: command.imageId } : {}),
+          ...(typeof command.imageIndex === 'number' ? { imageIndex: command.imageIndex } : {}),
+          ...(typeof command.canvasWidth === 'number' ? { canvasWidth: command.canvasWidth } : {}),
+          ...(typeof command.canvasHeight === 'number' ? { canvasHeight: command.canvasHeight } : {}),
+          ...(typeof command.brushColor === 'string' ? { brushColor: command.brushColor } : {}),
+          ...(typeof command.brushSize === 'number' ? { brushSize: command.brushSize } : {}),
+        });
+        break;
+      }
+      case 'clear_drawing': {
+        commands.push({ type: 'clear_drawing' });
+        break;
+      }
+      case 'set_image_hotspot': {
+        commands.push({
+          type: 'set_image_hotspot',
+          prompt: trimmed(command.prompt, 'Tap the correct region.'),
+          ...(typeof command.backgroundImageUrl === 'string'
+            ? { backgroundImageUrl: command.backgroundImageUrl }
+            : {}),
+          ...(typeof command.imageId === 'string' ? { imageId: command.imageId } : {}),
+          ...(typeof command.imageIndex === 'number' ? { imageIndex: command.imageIndex } : {}),
+          hotspots: Array.isArray(command.hotspots)
+            ? command.hotspots
+                .filter((hotspot: unknown) => hotspot && typeof hotspot === 'object')
+                .map((hotspot: Record<string, unknown>) => ({
+                  label: trimmed(hotspot.label, 'Hotspot'),
+                  ...(typeof hotspot.id === 'string' ? { id: hotspot.id } : {}),
+                  ...(typeof hotspot.x === 'number' ? { x: hotspot.x } : {}),
+                  ...(typeof hotspot.y === 'number' ? { y: hotspot.y } : {}),
+                  ...(typeof hotspot.radius === 'number' ? { radius: hotspot.radius } : {}),
+                  ...(hotspot.isCorrect === true ? { isCorrect: true } : {}),
+                }))
+            : [],
+          ...(command.allowMultiple === true ? { allowMultiple: true } : {}),
+        });
+        break;
+      }
+      case 'clear_image_hotspot': {
+        commands.push({ type: 'clear_image_hotspot' });
+        break;
+      }
+      case 'set_timeline': {
+        commands.push({
+          type: 'set_timeline',
+          prompt: trimmed(command.prompt, 'Place the events in order.'),
+          items: Array.isArray(command.items)
+            ? command.items
+                .filter((item: unknown) => item && typeof item === 'object')
+                .map((item: Record<string, unknown>) => ({
+                  label: trimmed(item.label, 'Item'),
+                  ...(typeof item.id === 'string' ? { id: item.id } : {}),
+                  ...(typeof item.correctPosition === 'number'
+                    ? { correctPosition: item.correctPosition }
+                    : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_timeline': {
+        commands.push({ type: 'clear_timeline' });
+        break;
+      }
+      case 'set_continuous_axis': {
+        commands.push({
+          type: 'set_continuous_axis',
+          prompt: trimmed(command.prompt, 'Place the value on the axis.'),
+          min: typeof command.min === 'number' ? command.min : 0,
+          max: typeof command.max === 'number' ? command.max : 10,
+          ...(typeof command.step === 'number' ? { step: command.step } : {}),
+          ...(typeof command.correctValue === 'number'
+            ? { correctValue: command.correctValue }
+            : {}),
+          ...(command.correctRange &&
+          typeof command.correctRange === 'object' &&
+          typeof (command.correctRange as { min?: unknown }).min === 'number' &&
+          typeof (command.correctRange as { max?: unknown }).max === 'number'
+            ? {
+                correctRange: {
+                  min: (command.correctRange as { min: number }).min,
+                  max: (command.correctRange as { max: number }).max,
+                },
+              }
+            : {}),
+          ...(typeof command.leftLabel === 'string' ? { leftLabel: command.leftLabel } : {}),
+          ...(typeof command.rightLabel === 'string' ? { rightLabel: command.rightLabel } : {}),
+        });
+        break;
+      }
+      case 'clear_continuous_axis': {
+        commands.push({ type: 'clear_continuous_axis' });
+        break;
+      }
+      case 'set_venn_diagram': {
+        commands.push({
+          type: 'set_venn_diagram',
+          prompt: trimmed(command.prompt, 'Place the items in the correct region.'),
+          leftLabel: trimmed(command.leftLabel, 'Left'),
+          rightLabel: trimmed(command.rightLabel, 'Right'),
+          items: Array.isArray(command.items)
+            ? command.items
+                .filter((item: unknown) => item && typeof item === 'object')
+                .map((item: Record<string, unknown>) => ({
+                  label: trimmed(item.label, 'Item'),
+                  ...(typeof item.id === 'string' ? { id: item.id } : {}),
+                  ...(item.correctRegion === 'left' ||
+                  item.correctRegion === 'overlap' ||
+                  item.correctRegion === 'right'
+                    ? { correctRegion: item.correctRegion }
+                    : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_venn_diagram': {
+        commands.push({ type: 'clear_venn_diagram' });
+        break;
+      }
+      case 'set_token_builder': {
+        commands.push({
+          type: 'set_token_builder',
+          prompt: trimmed(command.prompt, 'Build the correct expression.'),
+          tokens: Array.isArray(command.tokens)
+            ? command.tokens
+                .filter((token: unknown) => token && typeof token === 'object')
+                .map((token: Record<string, unknown>) => ({
+                  label: trimmed(token.label, 'Token'),
+                  ...(typeof token.id === 'string' ? { id: token.id } : {}),
+                  ...(typeof token.color === 'string' ? { color: token.color } : {}),
+                }))
+            : [],
+          ...(typeof command.slots === 'number' ? { slots: command.slots } : {}),
+          ...(Array.isArray(command.correctTokenIds)
+            ? { correctTokenIds: command.correctTokenIds.filter((id: unknown): id is string => typeof id === 'string') }
+            : {}),
+        });
+        break;
+      }
+      case 'clear_token_builder': {
+        commands.push({ type: 'clear_token_builder' });
+        break;
+      }
+      case 'set_process_flow': {
+        commands.push({
+          type: 'set_process_flow',
+          prompt: trimmed(command.prompt, 'Arrange the process steps.'),
+          nodes: Array.isArray(command.nodes)
+            ? command.nodes
+                .filter((node: unknown) => node && typeof node === 'object')
+                .map((node: Record<string, unknown>) => ({
+                  label: trimmed(node.label, 'Node'),
+                  ...(typeof node.id === 'string' ? { id: node.id } : {}),
+                  ...(typeof node.correctPosition === 'number'
+                    ? { correctPosition: node.correctPosition }
+                    : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_process_flow': {
+        commands.push({ type: 'clear_process_flow' });
+        break;
+      }
+      case 'set_part_whole_builder': {
+        commands.push({
+          type: 'set_part_whole_builder',
+          prompt: trimmed(command.prompt, 'Show the correct share.'),
+          totalParts: typeof command.totalParts === 'number' ? command.totalParts : 4,
+          ...(typeof command.correctFilledParts === 'number'
+            ? { correctFilledParts: command.correctFilledParts }
+            : {}),
+          ...(typeof command.label === 'string' ? { label: command.label } : {}),
+        });
+        break;
+      }
+      case 'clear_part_whole_builder': {
+        commands.push({ type: 'clear_part_whole_builder' });
+        break;
+      }
+      case 'set_map_canvas': {
+        commands.push({
+          type: 'set_map_canvas',
+          prompt: trimmed(command.prompt, 'Pick the correct place on the map.'),
+          ...(typeof command.backgroundImageUrl === 'string'
+            ? { backgroundImageUrl: command.backgroundImageUrl }
+            : {}),
+          ...(typeof command.imageId === 'string' ? { imageId: command.imageId } : {}),
+          ...(typeof command.imageIndex === 'number' ? { imageIndex: command.imageIndex } : {}),
+          pins: Array.isArray(command.pins)
+            ? command.pins
+                .filter((pin: unknown) => pin && typeof pin === 'object')
+                .map((pin: Record<string, unknown>) => ({
+                  label: trimmed(pin.label, 'Pin'),
+                  ...(typeof pin.id === 'string' ? { id: pin.id } : {}),
+                  ...(typeof pin.x === 'number' ? { x: pin.x } : {}),
+                  ...(typeof pin.y === 'number' ? { y: pin.y } : {}),
+                  ...(pin.isCorrect === true ? { isCorrect: true } : {}),
+                }))
+            : [],
+          ...(command.allowMultiple === true ? { allowMultiple: true } : {}),
+        });
+        break;
+      }
+      case 'clear_map_canvas': {
+        commands.push({ type: 'clear_map_canvas' });
+        break;
+      }
+      case 'set_claim_evidence_builder': {
+        commands.push({
+          type: 'set_claim_evidence_builder',
+          prompt: trimmed(command.prompt, 'Pick the claim and supporting evidence.'),
+          claims: Array.isArray(command.claims)
+            ? command.claims
+                .filter((claim: unknown) => claim && typeof claim === 'object')
+                .map((claim: Record<string, unknown>) => ({
+                  label: trimmed(claim.label, 'Claim'),
+                  ...(typeof claim.id === 'string' ? { id: claim.id } : {}),
+                  ...(claim.isCorrect === true ? { isCorrect: true } : {}),
+                }))
+            : [],
+          evidenceItems: Array.isArray(command.evidenceItems)
+            ? command.evidenceItems
+                .filter((item: unknown) => item && typeof item === 'object')
+                .map((item: Record<string, unknown>) => ({
+                  label: trimmed(item.label, 'Evidence'),
+                  ...(typeof item.id === 'string' ? { id: item.id } : {}),
+                  ...(typeof item.supportsClaimId === 'string'
+                    ? { supportsClaimId: item.supportsClaimId }
+                    : {}),
+                }))
+            : [],
+        });
+        break;
+      }
+      case 'clear_claim_evidence_builder': {
+        commands.push({ type: 'clear_claim_evidence_builder' });
+        break;
+      }
+      case 'set_compare_matrix': {
+        commands.push({
+          type: 'set_compare_matrix',
+          prompt: trimmed(command.prompt, 'Compare the items across the traits.'),
+          rows: Array.isArray(command.rows)
+            ? command.rows
+                .filter((row: unknown) => row && typeof row === 'object')
+                .map((row: Record<string, unknown>) => ({
+                  label: trimmed(row.label, 'Row'),
+                  ...(typeof row.id === 'string' ? { id: row.id } : {}),
+                }))
+            : [],
+          columns: Array.isArray(command.columns)
+            ? command.columns
+                .filter((column: unknown) => column && typeof column === 'object')
+                .map((column: Record<string, unknown>) => ({
+                  label: trimmed(column.label, 'Column'),
+                  ...(typeof column.id === 'string' ? { id: column.id } : {}),
+                }))
+            : [],
+          ...(Array.isArray(command.correctCells)
+            ? {
+                correctCells: command.correctCells.filter(
+                  (cell: unknown): cell is string => typeof cell === 'string'
+                ),
+              }
+            : {}),
+        });
+        break;
+      }
+      case 'clear_compare_matrix': {
+        commands.push({ type: 'clear_compare_matrix' });
+        break;
+      }
+      case 'set_flashcard': {
+        commands.push({
+          type: 'set_flashcard',
+          prompt: trimmed(command.prompt, 'Study the card, then flip it.'),
+          front: trimmed(command.front, ''),
+          back: trimmed(command.back, ''),
+        });
+        break;
+      }
+      case 'clear_flashcard': {
+        commands.push({ type: 'clear_flashcard' });
+        break;
+      }
+      case 'set_true_false': {
+        commands.push({
+          type: 'set_true_false',
+          prompt: trimmed(command.prompt, 'Decide whether the statement is true or false.'),
+          statement: trimmed(command.statement, ''),
+          ...(typeof command.correctAnswer === 'boolean'
+            ? { correctAnswer: command.correctAnswer }
+            : {}),
+        });
+        break;
+      }
+      case 'clear_true_false': {
+        commands.push({ type: 'clear_true_false' });
+        break;
+      }
       default:
         break;
     }
@@ -264,16 +858,22 @@ function sanitizeTutorResponse(value: unknown): Sanitized<TutorModelResponse> | 
   const commands = sanitizeCommands(record.commands);
   const fallbackAwaitMode = commands.length > 0 ? 'voice_or_canvas' : 'voice';
   const awaitMode = sanitizeAwaitMode(record.awaitMode, fallbackAwaitMode);
+  const canvasAction = sanitizeCanvasAction(
+    record.canvasAction,
+    inferCanvasAction(commands)
+  );
+  const issues = [awaitMode.issue, canvasAction.issue].filter(Boolean) as string[];
 
   return {
     response: {
       speech,
       awaitMode: awaitMode.awaitMode,
+      canvasAction: canvasAction.canvasAction,
       commands,
       sessionComplete: record.sessionComplete === true,
       status: record.sessionComplete === true ? 'completed' : 'active',
     },
-    issues: awaitMode.issue ? [awaitMode.issue] : [],
+    issues,
   };
 }
 
@@ -281,6 +881,7 @@ function sanitizeTutorIntakeResponse(
   value: unknown,
   context: { latestUserMessage?: string | null }
 ): Sanitized<TutorIntakeResponse> | null {
+  void context;
   if (!value || typeof value !== 'object') {
     return null;
   }
@@ -296,19 +897,7 @@ function sanitizeTutorIntakeResponse(
   const learnerLevel = trimmed(record.learnerLevel) || null;
   const awaitMode = sanitizeAwaitMode(record.awaitMode, 'voice');
   const issues = awaitMode.issue ? [awaitMode.issue] : [];
-  let readyToStartLesson = record.readyToStartLesson === true && Boolean(topic);
-
-  if (
-    !readyToStartLesson &&
-    shouldAutoStartTutorLesson({
-      topic,
-      learnerLevel,
-      latestUserMessage: context.latestUserMessage,
-    })
-  ) {
-    readyToStartLesson = true;
-    issues.push('Promoted readyToStartLesson from tutor intake heuristics');
-  }
+  const readyToStartLesson = record.readyToStartLesson === true && Boolean(topic);
 
   return {
     response: {
@@ -327,10 +916,25 @@ function logTutorDebug(debug: TutorLlmDebugTrace) {
     return;
   }
 
-  console.log(`[tutor:${debug.stage}] system prompt + history`, debug.messages);
-  console.log(`[tutor:${debug.stage}] raw response text`, debug.rawResponseText);
-  console.log(`[tutor:${debug.stage}] raw model content`, debug.rawModelContent);
-  console.log(`[tutor:${debug.stage}] parsed response`, debug.parsedResponse);
+  console.log(
+    `[tutor:${debug.stage}] system prompt + history\n${JSON.stringify(
+      formatTutorDebugMessages(debug.messages),
+      null,
+      2
+    )}`
+  );
+  console.log(
+    `[tutor:${debug.stage}] raw response text`,
+    formatTutorDebugValue(debug.rawResponseText)
+  );
+  console.log(
+    `[tutor:${debug.stage}] raw model content`,
+    formatTutorDebugValue(debug.rawModelContent)
+  );
+  console.log(
+    `[tutor:${debug.stage}] parsed response`,
+    formatTutorDebugValue(debug.parsedResponse)
+  );
   console.log(`[tutor:${debug.stage}] fallback`, {
     usedFallback: debug.usedFallback,
     fallbackReason: debug.fallbackReason,
@@ -447,12 +1051,11 @@ function buildEquationFallback(prompt: string): TutorModelResponse {
   return {
     speech: `Let’s start. How would you solve ${left} plus ${right}? Talk me through it.`,
     awaitMode: 'voice_or_canvas',
+    canvasAction: 'replace',
     sessionComplete: false,
     status: 'active',
     commands: [
       { type: 'set_mode', mode: 'equation' },
-      { type: 'set_headline', headline: 'Equation board' },
-      { type: 'set_instruction', instruction: 'Pick a result, then explain why it works.' },
       {
         type: 'set_equation',
         prompt: 'Choose the result that fits the expression.',
@@ -479,12 +1082,11 @@ export function buildInitialTutorFallback(prompt: string): TutorModelResponse {
   return {
     speech: `Let’s begin with ${prompt.trim()}. Move the board pieces and tell me what you already know.`,
     awaitMode: 'voice_or_canvas',
+    canvasAction: 'replace',
     sessionComplete: false,
     status: 'active',
     commands: [
       { type: 'set_mode', mode: 'distribution' },
-      { type: 'set_headline', headline: 'Thinking board' },
-      { type: 'set_instruction', instruction: 'Sort ideas before you explain your next move.' },
       {
         type: 'set_zones',
         zones: [
@@ -508,28 +1110,11 @@ function buildTutorIntakeFallback(args: {
   const topic = trimmed(args.topic) || null;
   const learnerLevel = trimmed(args.learnerLevel) || null;
 
-  if (
-    topic &&
-    shouldAutoStartTutorLesson({
-      topic,
-      learnerLevel,
-      latestUserMessage: args.latestUserMessage,
-    })
-  ) {
+  if (topic) {
     return {
       speech: `Let’s start with ${topic}. What do you already know about it?`,
       awaitMode: 'voice',
       readyToStartLesson: true,
-      topic,
-      learnerLevel,
-    };
-  }
-
-  if (topic) {
-    return {
-      speech: `We can work on ${topic}. What part would you like to understand first?`,
-      awaitMode: 'voice',
-      readyToStartLesson: false,
       topic,
       learnerLevel,
     };
@@ -559,7 +1144,7 @@ export async function generateTutorIntakeTurn(args: {
     {
       role: 'system',
       content:
-        'You are the opening intake for a live AI tutor. Return strict JSON only with keys speech, awaitMode, readyToStartLesson, topic, learnerLevel. awaitMode must be exactly "voice" or "voice_or_canvas" and nothing else. Keep the tone natural, brief, and interactive. Prefer one short sentence or one short question at a time. Ask at most one useful follow-up question at a time. Do not ask motivation questions like whether this is for class, curiosity, gardening, work, or personal interest unless the learner explicitly brings that up. Infer learnerLevel from the learner wording whenever possible instead of forcing a separate questionnaire. If the learner has already given you the topic and a rough level, start the lesson immediately. If the learner asks a direct content question, start the lesson immediately. Set readyToStartLesson true only when you know the lesson topic well enough to begin teaching immediately. topic should be a concise normalized lesson topic or null if still unclear. learnerLevel should be a short phrase like beginner, some familiarity, or null if still unknown. Never mention setup screens, stages, forms, titles, or labels.',
+        'You are the opening intake for a live AI tutor. Return strict JSON only with keys speech, awaitMode, readyToStartLesson, topic, learnerLevel. awaitMode must be exactly "voice" or "voice_or_canvas" and nothing else. RULES: (1) Be extremely brief — 1 sentence max. (2) As soon as you can identify a topic and level of user, set readyToStartLesson=true IMMEDIATELY. Do not ask follow-up questions about goals, sub-topics, or preferences. Do not ask whether this is for class, motivation, or curiosity. The learner wants to learn, not answer a questionnaire. (3) If the learner asks a content question, set readyToStartLesson=true with the topic extracted from their question. (5) Never ask more than one intake question total. topic = concise normalized topic or null. learnerLevel = short phrase or null. Never mention setup, stages, forms, titles, or labels.',
     },
     {
       role: 'user',
@@ -574,8 +1159,7 @@ export async function generateTutorIntakeTurn(args: {
     const outbound = buildOpenRouterRequest({
       messages,
       response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 700,
+      temperature: 0.7,
     });
 
     const response = await fetch(outbound.url, {
@@ -680,8 +1264,9 @@ export function buildTurnTutorFallback(args: {
 
   if (/(done|i get it|i understand|finished|that makes sense)/i.test(lower)) {
     return {
-      speech: 'Nice work. You have enough to move on, so I’m wrapping this round here.',
+      speech: 'Nice work. You really did get it, so we can wrap this round here.',
       awaitMode: 'voice',
+      canvasAction: 'clear',
       sessionComplete: true,
       status: 'completed',
       commands: [{ type: 'complete_session' }],
@@ -689,8 +1274,9 @@ export function buildTurnTutorFallback(args: {
   }
 
   return {
-    speech: `Good. Keep going. Right now I see: ${args.canvasSummary}`,
+    speech: `You’re okay. Let’s take the next small step together. Right now I see: ${args.canvasSummary}`,
     awaitMode: 'voice_or_canvas',
+    canvasAction: 'keep',
     sessionComplete: false,
     status: 'active',
     commands: [],
@@ -700,16 +1286,22 @@ export function buildTurnTutorFallback(args: {
 export async function generateLessonPreparation(input: {
   topic: string;
   learnerLevel: string;
+  continuationContext?: TutorContinuationContext | null;
 }): Promise<TutorLessonPreparation> {
+  const continuationPrompt = input.continuationContext
+    ? buildTutorContinuationPromptContext(input.continuationContext, {
+        includeTurns: true,
+      })
+    : 'No continuation context.';
   const messages: TutorMessage[] = [
     {
       role: 'system',
       content:
-        'You are preparing a conversational lesson. Return strict JSON only with keys openingSpeech, outline, imageSearchQuery, desiredImageCount. The lesson should be speech-first and fluid, not a task list. desiredImageCount must be an integer from 0 to 4. Ask for images only if they will genuinely help later explanation. Do not generate titles or labels.',
+        `You are preparing a conversational lesson. ${LIVE_TUTOR_PERSONALITY_SHORT_GUIDANCE} Return strict JSON only with keys openingSpeech, outline, imageSearchQuery, desiredImageCount. The lesson should be speech-first and fluid, not a task list. desiredImageCount must be an integer from 0 to 10. Ask for images only if they will genuinely help later explanation. So depending on the topic. For instance biology/history or the likes will need more images. Do not generate titles or labels. The openingSpeech should already sound warm, welcoming, and human. If prior continuation context is present, do not restart from zero. Resume from the learner's actual point of progress, use the prior strengths and weaknesses, and shape the new outline around the best next step. Make plan detailed`,
     },
     {
       role: 'user',
-      content: `Topic: ${input.topic}\nLearner level: ${input.learnerLevel}\n\nPrepare the lesson context for a speech-first tutoring session.`,
+      content: `Topic: ${input.topic}\nLearner level: ${input.learnerLevel}\n\nPrior lesson continuation context:\n${continuationPrompt}\n\nPrepare the lesson context for a speech-first tutoring session. If continuation context exists, treat this as a resumed lesson and continue from there.`,
     },
   ];
 
@@ -717,8 +1309,7 @@ export async function generateLessonPreparation(input: {
     const outbound = buildOpenRouterRequest({
       messages,
       response_format: { type: 'json_object' },
-      temperature: 0.2,
-      max_tokens: 700,
+      temperature: 0.7,
     });
     const response = await fetch(outbound.url, {
       method: 'POST',
@@ -765,21 +1356,25 @@ export async function generateInitialTutorResponse(input: {
   outline: string[];
   imageAssets: TutorMediaAsset[];
   openingSpeech: string;
+  continuationContext?: TutorContinuationContext | null;
 }): Promise<TutorModelResult> {
+  const continuationPrompt = input.continuationContext
+    ? buildTutorContinuationPromptContext(input.continuationContext, {
+        includeTurns: false,
+      })
+    : 'No continuation context.';
   const imageContext = input.imageAssets.length
-    ? input.imageAssets
-        .map((asset, index) => `${index}: ${asset.id} | ${asset.altText} | ${asset.description}`)
-        .join('\n')
+    ? input.imageAssets.map((asset, index) => `${index}: ${formatTutorImageContextLine(asset)}`).join('\n')
     : 'No prepared images.';
   const messages: TutorMessage[] = [
     {
       role: 'system',
       content:
-        'You are preparing the opening turn for a speech-first live tutor. Return strict JSON only with keys speech, awaitMode, sessionComplete, commands. Use awaitMode values voice or voice_or_canvas only. Every command object must use a key named type, never command. Allowed commands are set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, complete_session. For set_headline use a headline field. For set_instruction use an instruction field. For set_zones use zones with id, label, optional hint, optional color, and optional count. If you want visible movable objects, either emit explicit set_tokens tokens or provide zone count values so tokens can be generated. Keep the lesson conversational, brief, and interactive. Prefer one short explanation beat followed by a question or action cue. Do not dump long lectures. Only use image or canvas commands when they genuinely help understanding. Do not generate titles or labels outside canvas commands.',
+        `You are a live speech-first tutor. ${LIVE_TUTOR_PERSONALITY_GUIDANCE} Return strict JSON with keys speech, awaitMode, sessionComplete, canvasAction, commands. awaitMode: voice or voice_or_canvas. canvasAction must be exactly keep, replace, or clear. TEACHING RULES: (1) Actually TEACH — explain a concept, give a fact, describe what is happening, or build on what the learner said. Do not just ask questions back-to-back. (2) Keep speech to 2-3 sentences: one sentence teaching, one engaging the learner. (3) Never leave dead air — give the learner something to say, look at, or do, but commands can be empty when speech alone is enough. (4) Show images when available and genuinely helpful. (5) The speech must always match the commands. Do not say one thing and spawn a different task. (6) It is not compulsory to always show something; you may just be talking or asking. (7) If you ask the learner to look at an image or diagram, do not spawn an unrelated quiz or task in the same turn. Either just show the image, or make any canvas task directly about that same image. (8) If you ask the learner to point, mark, circle, trace, or identify a part on an image, use set_drawing and attach that same image via imageId, imageIndex, or backgroundImageUrl so the learner can mark it. Explicitly tell the learner which drawing color to use, and keep that aligned with brushColor. (9) canvasAction rules: keep = preserve the current canvas/task, replace = swap in a new task and discard the old one, clear = remove the current canvas task. (10) For code_block tasks, starterCode must contain only real code the learner should keep or edit. Never put instructional placeholder comments or prose inside starterCode such as "# Type your math here and press Enter". If no starter code is needed, use an empty string and keep the instruction in prompt instead. (11) If continuation context is present, briefly bridge from the previous lesson, do not restart from zero, and build directly from the prior strengths, weaknesses, and resume hint. Every command uses key "type". ${LIVE_TUTOR_CANVAS_GUIDANCE} ${LIVE_TUTOR_ALLOWED_COMMANDS} ${LIVE_TUTOR_CANVAS_MODE_DESCRIPTIONS} Use the most appropriate canvas mode for each teaching moment.`,
     },
     {
       role: 'user',
-      content: `Topic: ${input.topic}\nLearner level: ${input.learnerLevel}\nPreparation outline:\n- ${input.outline.join('\n- ')}\nPrepared images:\n${imageContext}\nOpening prep speech: ${input.openingSpeech}\n\nPrepare the opening live tutor turn. If an image would help immediately, use show_image. If a canvas scene helps, set it up.`,
+      content: `Topic: ${input.topic}\nLearner level: ${input.learnerLevel}\nPreparation outline:\n- ${input.outline.join('\n- ')}\nPrepared images:\n${imageContext}\nOpening prep speech: ${input.openingSpeech}\n\nPrior lesson continuation context:\n${continuationPrompt}\n\nPrepare the opening live tutor turn. If an image would help immediately, use show_image. If a canvas scene helps, set it up. It is valid to return no canvas commands at all. If you tell the learner to inspect an image or diagram, do not also spawn a separate unrelated quiz in that same turn. Mkae use of images as much as possible as far as their useful dont just stick to one image.`,
     },
   ];
 
@@ -815,28 +1410,107 @@ export async function generateTutorTurn(args: {
   outline: string[];
   imageAssets: TutorMediaAsset[];
   activeImageId: string | null;
+  continuationContext?: TutorContinuationContext | null;
   transcript: string;
   canvasSummary: string;
+  canvasStateContext?: string;
+  latestLearnerTurnContext?: string;
+  recentTurnFrames?: string;
   recentTurns: string;
+  canvasTaskPrompt?: string | null;
+  canvasReferenceImageUrl?: string | null;
+  canvasBrushColor?: string | null;
+  canvasEvidence?: TutorCanvasEvidence | null;
 }): Promise<TutorModelResult> {
+  const continuationPrompt = args.continuationContext
+    ? buildTutorContinuationPromptContext(args.continuationContext, {
+        includeTurns: false,
+      })
+    : 'No continuation context.';
   const imageContext = args.imageAssets.length
-    ? args.imageAssets
-        .map((asset, index) => `${index}: ${asset.id} | ${asset.altText} | ${asset.description}`)
-        .join('\n')
+    ? args.imageAssets.map((asset, index) => `${index}: ${formatTutorImageContextLine(asset)}`).join('\n')
     : 'No prepared images.';
-  const activeImageContext =
-    args.imageAssets.find((asset) => asset.id === args.activeImageId)?.altText || 'none';
+  const activeImageAsset = args.imageAssets.find((asset) => asset.id === args.activeImageId);
+  const activeImageContext = activeImageAsset ? formatTutorImageContextLine(activeImageAsset) : 'none';
   const messages: TutorMessage[] = [
     {
       role: 'system',
       content:
-        'You are the live tutor inside a minimal speech-and-canvas product. Return strict JSON only with keys speech, awaitMode, sessionComplete, commands. Use awaitMode values voice or voice_or_canvas only. Every command object must use a key named type, never command. Allowed commands are set_mode, set_headline, set_instruction, set_tokens, clear_tokens, set_zones, set_equation, clear_equation, show_image, clear_image, complete_session. For set_headline use a headline field. For set_instruction use an instruction field. For set_zones use zones with id, label, optional hint, optional color, and optional count. If you want visible movable objects, either emit explicit set_tokens tokens or provide zone count values so tokens can be generated. Keep this lesson conversational, brief, and interactive. Prefer one short explanation step, then hand back to the learner. Do not dump long lectures. Use image or canvas commands only when they help the explanation. Do not generate titles or labels outside canvas commands.',
-    },
-    {
-      role: 'user',
-      content: `Topic: ${args.topic}\nLearner level: ${args.learnerLevel}\nLesson outline:\n- ${args.outline.join('\n- ')}\nAvailable images:\n${imageContext}\nCurrently shown image: ${activeImageContext}\nLatest learner transcript: ${args.transcript}\nCurrent canvas summary: ${args.canvasSummary}\nRecent dialogue: ${args.recentTurns}\n\nReturn the next live tutor turn. Only change the board or image when that helps the explanation.`,
+        `You are Tibia, a funny, brief and supportive live tutor in a speech-and-canvas. You dont talk too much. You talk in max 3-5 sentences. ${LIVE_TUTOR_PERSONALITY_GUIDANCE}. In EVERY TURN, YOU MUST ALWAYS SAY YOUR SPEECH IN MAX 4 SENTENCES WITHOUT LEAVING A DEAD AIR. Return strict JSON with keys speech, awaitMode, sessionComplete, canvasAction, commands. awaitMode: voice or voice_or_canvas. canvasAction must be exactly keep, replace, or clear. Persona: You must be funny and nice to talk to. But must be brief in your speech. If user says something unrelated, just create something fun from that and redirect them to the lesson. Use stop words a lot for natural sounding. like 'um', 'huh', 'you know' etc.\n\n TEACHING RULES: CRITICAL: Decide your commands BEFORE writing speech. If you will replace or show something on the board, your speech must reference it as already visible — so dont ask if the learner wants to see it rather point them to what you want them to do with it since its already showing." (1) TEACH first — explain a concept, state a fact, describe what the learner is seeing, or connect to what they just said. Do not just ask questions without teaching. (2) Keep speech to 2-3 concise sentences: teach something, then prompt the learner to respond or interact. (3) Never leave dead air — give the learner something to say, look at, or do, but commands can be empty when speech alone is enough. (4) If an image is available and relevant, show it. Make use of images as much as possible. You must switch between the images you have for explanations. (5) The speech must always match the commands. Do not say one thing and spawn a different thing. And if you spawn something, then direct then user towards it in your speech. (6) Read the structured current canvas state and structured turn history carefully; prefer them over any lossy prose summary. The recent turn history is chronological oldest first, newest last. (7) If you ask the learner to look at an image or diagram, do not spawn an unrelated quiz or task in the same turn. Either just show the image, or make any canvas task directly about that same image. (8) If you ask the learner to point, mark, circle, trace, or identify a part on an image, use set_drawing and attach that same image via imageId, imageIndex, or backgroundImageUrl so the learner can mark it. When you do this, explicitly tell the learner which drawing color to use, and keep that aligned with brushColor. (9) When the learner answers, give immediate feedback: say whether they are right or wrong in a nice way, explain why, then move forward. Always be brief in your speech so that you dont bore the student. If their answer is correct or substantially correct, acknowledge it and progress to the next concept else make things simpler for struggling users. Do NOT ask another question about the same concept after a correct answer. When the learner gives an answer, judge the exact answer they gave. Do not rewrite or swap their answer before evaluating it. correct them nicely if wrong or move it nicely if right. (10) NEVER include the answer in your question prompt. Do not say "(Answer: ...)" or give away the solution. Let the learner think and respond. (11) Progress through the lesson outline — do not get stuck repeating the same question or asking variations of the same question. Move to new material after the learner demonstrates understanding. (12) If learner markup evidence is attached, treat it as the learner answer attempt for the current drawing task. If both the original reference image and the learner-marked image are attached, the learner marks appear only in the second image. Evaluate those marks first, acknowledge what the learner circled/pointed to, and do not talk about their markings as if they were pre-existing labels in the original diagram. (13) If continuation context exists, use it to remember the learner's prior strengths, weaknesses, and resume point; build forward from that instead of treating them as brand new. canvasAction rules: keep = preserve the current canvas/task, replace = swap in a new task and discard the old one, clear = remove the current canvas task. ENDING RULES: (13) If the learner clearly wants to stop, end, be done, finish, wrap up, or call it a day, immediately set sessionComplete=true, use awaitMode="voice", and include a complete_session command. Do not keep teaching or assign another task after an explicit stop request. (14) If the learner seems to understand the current concept well enough, you may ask a brief choice such as "one more example or call it a day?" In that choice turn, keep sessionComplete=false until the learner answers. (15) If the learner answers that choice with wanting to continue, keep teaching with sessionComplete=false. If the learner answers with wanting to end, set sessionComplete=true. (16) sessionComplete should stay false unless you are either ending now or confident the learner just asked to end now. (17) For code_block tasks, starterCode must contain only real code the learner should keep or edit. Never put instructional placeholder comments or prose inside starterCode. If no starter code is needed, use an empty string and keep the instruction in prompt instead. Every command uses key "type". (18) If you show or replace a board or image in this turn, do not ask whether the learner wants to see it. It is already on screen, so tell them exactly where to look or what to do next. So be careful with your speech + canvas the rule is. If speech asking if user wants to see then dont show canvas yet. But if speech is already talking about the image/task then show it in canvas. Eg. if in the speech youre asking use in the end, 'do you wanna see an image showing...' then no image should be spawned yet. But if you say in speech '...now take a look at this image/ if its a canvas for drawing or coding' then meaning the canvas showing that thing must come. Do not say you can pop something up if your commands already popped it up. And never use this symbol \`\ if you want quote something use this '. so intead of \`name\` write 'name'.. (19) when saying goodbye, remind the user than youre creating an article for what theyve studied so they can check the sidebar and read. ${LIVE_TUTOR_CANVAS_GUIDANCE} ${LIVE_TUTOR_ALLOWED_COMMANDS} ${LIVE_TUTOR_CANVAS_MODE_DESCRIPTIONS} Use the best canvas modes for each teaching moment. Be creative`
     },
   ];
+
+  const canvasEvidenceContext = args.canvasEvidence?.dataUrl
+    ? [
+        'A learner markup submission is attached.',
+        args.canvasTaskPrompt ? `Current drawing task: ${args.canvasTaskPrompt}` : null,
+        args.canvasBrushColor
+          ? `Expected learner markup color for this task: ${args.canvasBrushColor}.`
+          : null,
+        args.canvasEvidence?.strokeColors?.length
+          ? `Detected markup colors in learner answer: ${args.canvasEvidence.strokeColors.join(', ')}.`
+          : null,
+        typeof args.canvasEvidence?.strokeCount === 'number'
+          ? `Detected learner stroke count: ${args.canvasEvidence.strokeCount}.`
+          : null,
+        args.canvasReferenceImageUrl
+          ? 'Attached image order: first the original reference image, then the learner\'s marked-up composite answer image.'
+          : 'The attached image is the learner\'s marked-up composite answer image.',
+        args.canvasEvidence?.overlayDataUrl
+          ? 'A final attached image is a markup-only overlay showing just the learner-added strokes without the original diagram.'
+          : null,
+        'Treat circles, arrows, highlights, traces, and scribbles in the learner answer image as the learner\'s work.',
+        'First judge whether the learner marked the right place. Explicitly acknowledge the learner markup before moving on.',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : null;
+
+  const userPrompt = `Topic: ${args.topic}\nLearner level: ${args.learnerLevel}\nLesson outline:\n- ${args.outline.join('\n- ')}\nAvailable images:\n${imageContext}\nCurrently shown image: ${activeImageContext}\nPrior lesson continuation context:\n${continuationPrompt}\nLatest learner transcript: ${args.transcript}\nLatest learner turn (structured JSON):\n${args.latestLearnerTurnContext || 'none'}\nCurrent canvas state (structured JSON):\n${args.canvasStateContext || 'none'}\nCurrent canvas summary: ${args.canvasSummary}\nCanvas evidence summary: ${args.canvasEvidence?.summary || 'none'}\nRecent turn history (structured JSON, chronological oldest first, newest last):\n${args.recentTurnFrames || '[]'}\nRecent dialogue (legacy prose summary): ${args.recentTurns}${canvasEvidenceContext ? `\n\n${canvasEvidenceContext}` : ''}\n\nReturn the next live tutor turn. Only change the board or image when that helps the explanation.`;
+
+  const userContent: string | OpenRouterContentPart[] =
+    args.canvasEvidence?.dataUrl
+      ? [
+          {
+            type: 'text',
+            text: userPrompt,
+          },
+          ...(args.canvasReferenceImageUrl
+            ? [
+                {
+                  type: 'image_url' as const,
+                  image_url: {
+                    url: args.canvasReferenceImageUrl,
+                    detail: 'high' as const,
+                  },
+                },
+              ]
+            : []),
+          {
+            type: 'image_url',
+            image_url: {
+              url: args.canvasEvidence.dataUrl,
+              detail: 'high',
+            },
+          },
+          ...(args.canvasEvidence.overlayDataUrl
+            ? [
+                {
+                  type: 'image_url' as const,
+                  image_url: {
+                    url: args.canvasEvidence.overlayDataUrl,
+                    detail: 'high' as const,
+                  },
+                },
+              ]
+            : []),
+        ]
+      : userPrompt;
+
+  messages.push({
+    role: 'user',
+    content: userContent,
+  });
 
   try {
     const result = await callModel('turn', messages);

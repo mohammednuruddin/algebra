@@ -2,7 +2,7 @@
 
 ## Overview
 
-The lesson history page displays all completed lessons for an authenticated user. It provides a visual grid of lesson cards with thumbnails, titles, dates, and quick stats.
+The lesson history page displays completed lessons for the current browser session. It provides a visual grid of lesson cards with thumbnails, titles, dates, and quick stats.
 
 ## Features
 
@@ -26,10 +26,11 @@ The lesson history page displays all completed lessons for an authenticated user
 
 ## Data Source
 
-Fetches from `lesson_articles` table:
-- Filters by authenticated user ID
-- Orders by creation date (newest first)
-- Includes metadata JSON with stats
+For guest lessons, the page reads from browser-backed lesson history via `listGuestHistoryItems()`.
+Thumbnail selection prefers:
+- `metadata_json.first_image_url`
+- the first persisted lesson media asset URL
+- placeholder artwork only when no lesson image exists
 
 ## Metadata Structure
 

@@ -7,10 +7,11 @@ const TTS_REQUEST_TIMEOUT_MS = 15000;
 interface TutorVoicePlayerProps {
   text: string;
   voiceId: string;
-  provider: 'inworld' | 'elevenlabs';
+  provider: 'elevenlabs';
   modelId: string;
   enabled: boolean;
   playToken: number;
+  paused?: boolean;
   stopSignal?: number;
   onRequestStart?: () => void;
   onStart?: () => void;
@@ -25,6 +26,7 @@ export function TutorVoicePlayer({
   modelId,
   enabled,
   playToken,
+  paused = false,
   stopSignal,
   onRequestStart,
   onStart,
@@ -35,6 +37,7 @@ export function TutorVoicePlayer({
   const objectUrlRef = useRef<string | null>(null);
   const handlersRef = useRef({ onRequestStart, onStart, onComplete, onError });
   const lastPlayKeyRef = useRef<string | null>(null);
+  const pausedByParentRef = useRef(false);
 
   useEffect(() => {
     handlersRef.current = { onRequestStart, onStart, onComplete, onError };
@@ -72,10 +75,12 @@ export function TutorVoicePlayer({
       clearRequestTimeout();
 
       if (outcome === 'complete') {
+        pausedByParentRef.current = false;
         handlersRef.current.onComplete?.();
         return;
       }
 
+      pausedByParentRef.current = false;
       handlersRef.current.onError?.(error || new Error('Audio playback failed'));
     };
 
@@ -131,10 +136,12 @@ export function TutorVoicePlayer({
         audio.preload = 'auto';
         audio.onended = () => {
           audioRef.current = null;
+          pausedByParentRef.current = false;
           settlePlayback('complete');
         };
         audio.onerror = () => {
           audioRef.current = null;
+          pausedByParentRef.current = false;
           settlePlayback('error', new Error('Audio playback failed'));
         };
         await audio.play();
@@ -168,6 +175,7 @@ export function TutorVoicePlayer({
         audioRef.current.pause();
         audioRef.current = null;
       }
+      pausedByParentRef.current = false;
       settlePlayback('complete');
     };
   }, [enabled, modelId, playToken, provider, text, voiceId]);
@@ -180,6 +188,7 @@ export function TutorVoicePlayer({
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
       }
+      pausedByParentRef.current = false;
     };
   }, []);
 
@@ -192,8 +201,35 @@ export function TutorVoicePlayer({
     audioRef.current.onended = null;
     audioRef.current.onerror = null;
     audioRef.current = null;
+    pausedByParentRef.current = false;
     handlersRef.current.onComplete?.();
   }, [stopSignal]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    if (paused) {
+      if (!pausedByParentRef.current) {
+        audio.pause();
+        pausedByParentRef.current = true;
+      }
+      return;
+    }
+
+    if (!pausedByParentRef.current) {
+      return;
+    }
+
+    pausedByParentRef.current = false;
+    void audio.play().catch((error) => {
+      handlersRef.current.onError?.(
+        error instanceof Error ? error : new Error('Audio playback failed')
+      );
+    });
+  }, [paused]);
 
   return null;
 }

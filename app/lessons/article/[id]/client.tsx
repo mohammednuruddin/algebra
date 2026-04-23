@@ -9,19 +9,23 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import {
   ArrowLeft,
-  Calendar,
+  ArrowRight,
   Clock,
-  Target,
   CheckCircle2,
   Download,
   Share2,
   Check,
 } from 'lucide-react';
 import type { LessonArticleRecord } from '@/lib/types/database';
-import { getGuestArticle } from '@/lib/guest/guest-lesson-store';
+import {
+  getGuestArticle,
+  getGuestContinuationContextByArticleId,
+} from '@/lib/guest/guest-lesson-store';
+import { ArticleReader } from '@/components/lesson/article-reader';
 
 interface ArticleViewerProps {
   article: LessonArticleRecord;
+  continueHref?: string | null;
 }
 
 function resolveImageSrc(src?: string) {
@@ -41,7 +45,7 @@ function resolveImageSrc(src?: string) {
   return `/storage/v1/object/public/media-assets/${cleanPath}`;
 }
 
-export function ArticleViewer({ article }: ArticleViewerProps) {
+export function ArticleViewer({ article, continueHref = null }: ArticleViewerProps) {
   const [isDownloading, setIsDownloading] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const copyFeedbackTimeoutRef = useRef<number | null>(null);
@@ -148,195 +152,178 @@ export function ArticleViewer({ article }: ArticleViewerProps) {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
-      <header className="bg-white dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900/30">
+      <header className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 sticky top-0 z-10">
+        <div className="max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <Link
             href="/lessons/history"
-            className="inline-flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50 transition-colors"
+            className="inline-flex items-center gap-2 text-sm font-medium text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back to Lesson History
+            Library
           </Link>
+          
+          <div className="flex gap-2">
+            {continueHref ? (
+              <Link
+                href={continueHref}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-500 rounded-full transition-colors"
+              >
+                Continue lesson
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            ) : null}
+            <ArticleReader markdown={article.article_markdown} title={article.title} />
+            <button
+              onClick={handleShareLink}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full transition-colors"
+            >
+              {isCopied ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+              {isCopied ? 'Copied' : 'Share'}
+            </button>
+            <button
+              onClick={handleDownloadPDF}
+              disabled={isDownloading}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-zinc-900 dark:bg-zinc-50 dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              {isDownloading ? 'Downloading...' : 'Save PDF'}
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          <div className="lg:col-span-3">
-            <article
-              id="article-content"
-              className="bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 p-8"
-            >
-              <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 mb-6">
-                {article.title}
-              </h1>
-
-              <div className="flex gap-3 mb-6">
-                <button
-                  onClick={handleDownloadPDF}
-                  disabled={isDownloading}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed rounded-lg transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  {isDownloading ? 'Generating PDF...' : 'Download as PDF'}
-                </button>
-
-                <button
-                  onClick={handleShareLink}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-600 rounded-lg transition-colors"
-                >
-                  {isCopied ? (
-                    <>
-                      <Check className="w-4 h-4" />
-                      Link Copied!
-                    </>
-                  ) : (
-                    <>
-                      <Share2 className="w-4 h-4" />
-                      Share Link
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="prose dark:prose-invert max-w-none">
-                <ReactMarkdown
-                  remarkPlugins={[remarkMath, remarkGfm]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={{
-                    img: ({ src, ...props }) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        {...props}
-                        src={resolveImageSrc(
-                          typeof src === 'string' ? src : undefined
-                        )}
-                        className="rounded-lg max-w-full h-auto"
-                        loading="lazy"
-                        alt={props.alt || 'Article image'}
-                      />
-                    ),
-                  }}
-                >
-                  {article.article_markdown}
-                </ReactMarkdown>
-              </div>
-            </article>
-          </div>
-
-          <aside className="lg:col-span-1">
-            <div className="bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 p-6 sticky top-8">
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-4">
-                Lesson Details
-              </h2>
-
-              <div className="space-y-4">
-                {metadata?.topic && (
-                  <div>
-                    <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 mb-1">
-                      <Target className="w-4 h-4" />
-                      <span className="font-medium">Topic</span>
-                    </div>
-                    <p className="text-sm text-zinc-900 dark:text-zinc-50 ml-6">
-                      {metadata.topic}
-                    </p>
-                  </div>
-                )}
-
-                <div>
-                  <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 mb-1">
-                    <Calendar className="w-4 h-4" />
-                    <span className="font-medium">Date</span>
-                  </div>
-                  <p className="text-sm text-zinc-900 dark:text-zinc-50 ml-6">
-                    {formatDate(metadata?.date)}
-                  </p>
-                </div>
-
-                <div>
-                  <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 mb-1">
-                    <Clock className="w-4 h-4" />
-                    <span className="font-medium">Duration</span>
-                  </div>
-                  <p className="text-sm text-zinc-900 dark:text-zinc-50 ml-6">
-                    {formatDuration(metadata?.duration)}
-                  </p>
-                </div>
-
-                <div>
-                  <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 mb-1">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span className="font-medium">Milestones</span>
-                  </div>
-                  <p className="text-sm text-zinc-900 dark:text-zinc-50 ml-6">
-                    {metadata?.milestones_covered ?? 0} / {metadata?.total_milestones ?? 0} completed
-                  </p>
-                </div>
-
-                {metadata?.completion_percentage !== undefined && (
-                  <div>
-                    <div className="text-sm text-zinc-600 dark:text-zinc-400 mb-2">
-                      Completion
-                    </div>
-                    <div className="ml-6">
-                      <div className="flex items-center justify-between text-sm mb-1">
-                        <span className="text-zinc-900 dark:text-zinc-50 font-medium">
-                          {Math.round(metadata.completion_percentage)}%
-                        </span>
-                      </div>
-                      <div className="w-full bg-zinc-200 dark:bg-zinc-700 rounded-full h-2">
-                        <div
-                          className="bg-blue-600 h-2 rounded-full transition-all"
-                          style={{ width: `${metadata.completion_percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-6 pt-6 border-t border-zinc-200 dark:border-zinc-700">
-                <Link
-                  href="/lessons/history"
-                  className="flex items-center justify-center gap-2 w-full px-4 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-600 rounded-lg transition-colors"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                  All Lessons
-                </Link>
-              </div>
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-20">
+        <article id="article-content" className="py-8 sm:py-12 lg:py-16">
+          <header className="mb-16 border-b border-zinc-200 dark:border-zinc-800 pb-10">
+            <div className="flex items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400 mb-6">
+              {metadata?.topic && (
+                <span className="uppercase tracking-wider font-semibold text-indigo-600 dark:text-indigo-400">
+                  {metadata.topic}
+                </span>
+              )}
+              {metadata?.topic && <span>•</span>}
+              <time dateTime={metadata?.date || article.created_at}>
+                {formatDate(metadata?.date)}
+              </time>
             </div>
-          </aside>
-        </div>
-      </div>
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-serif font-medium text-zinc-900 dark:text-zinc-50 tracking-tight leading-tight mb-8">
+              {article.title}
+            </h1>
+            
+            {/* Rich Lesson Metadata */}
+            <div className="flex flex-wrap items-center gap-6 sm:gap-10 text-sm text-zinc-500 dark:text-zinc-400 pt-6 mt-6 border-t border-zinc-100 dark:border-zinc-800/50">
+              {metadata?.duration && (
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-zinc-400" />
+                  <span>{formatDuration(metadata.duration)} read</span>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-zinc-400" />
+                <span>
+                  {metadata?.milestones_covered ?? 0} / {metadata?.total_milestones ?? 0} milestones
+                </span>
+              </div>
+              {metadata?.completion_percentage !== undefined && (
+                <div className="flex items-center gap-3 flex-1 min-w-[200px]">
+                  <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                    {Math.round(metadata.completion_percentage)}%
+                  </span>
+                  <div className="w-32 bg-zinc-100 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="bg-indigo-600 dark:bg-indigo-500 h-full rounded-full transition-all duration-500 ease-out"
+                      style={{ width: `${metadata.completion_percentage}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </header>
+
+          <div className="prose prose-zinc dark:prose-invert prose-lg max-w-none prose-headings:font-serif prose-headings:font-medium prose-p:leading-relaxed prose-p:text-zinc-600 dark:prose-p:text-zinc-300 prose-a:text-indigo-600 dark:prose-a:text-indigo-400 hover:prose-a:text-indigo-500 prose-img:rounded-2xl prose-img:shadow-md">
+            <ReactMarkdown
+              remarkPlugins={[remarkMath, remarkGfm]}
+              rehypePlugins={[rehypeKatex]}
+              components={{
+                img: ({ src, ...props }) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    {...props}
+                    src={resolveImageSrc(
+                      typeof src === 'string' ? src : undefined
+                    )}
+                    className="rounded-2xl max-w-full h-auto object-cover"
+                    loading="lazy"
+                    alt={props.alt || 'Article image'}
+                  />
+                ),
+              }}
+            >
+              {article.article_markdown}
+            </ReactMarkdown>
+          </div>
+          
+          <footer className="mt-16 pt-8 border-t border-zinc-200 dark:border-zinc-800 flex justify-center">
+            <Link
+              href="/lessons/history"
+              className="inline-flex items-center justify-center gap-2 px-6 py-3 text-sm font-medium text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-full transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Return to Library
+            </Link>
+          </footer>
+        </article>
+      </main>
     </div>
   );
 }
 
 export function GuestArticlePage({ articleId }: { articleId: string }) {
   const article = useMemo(() => getGuestArticle(articleId), [articleId]);
+  const continueHref = useMemo(() => {
+    const continuation = getGuestContinuationContextByArticleId(articleId);
+    return continuation ? `/?continue=${encodeURIComponent(articleId)}` : null;
+  }, [articleId]);
 
   if (!article) {
     return (
-      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900 flex items-center justify-center px-4">
-        <div className="max-w-md text-center space-y-4">
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
-            Lesson article not found
-          </h1>
-          <p className="text-zinc-600 dark:text-zinc-400">
-            This browser does not have a saved article with that id yet.
-          </p>
+      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center px-4 font-sans">
+        <div className="max-w-md text-center space-y-6">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-900 mb-2">
+            <svg
+              className="w-8 h-8 text-zinc-400 dark:text-zinc-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+              />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-2xl font-serif font-medium text-zinc-900 dark:text-zinc-50 mb-3">
+              Article not found
+            </h1>
+            <p className="text-zinc-500 dark:text-zinc-400">
+              We couldn&apos;t find the lesson article you&apos;re looking for. It might have been deleted or the ID is incorrect.
+            </p>
+          </div>
           <Link
             href="/lessons/history"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900 rounded-full font-medium hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back to Lesson History
+            Return to Library
           </Link>
         </div>
       </div>
     );
   }
 
-  return <ArticleViewer article={article} />;
+  return <ArticleViewer article={article} continueHref={continueHref} />;
 }
